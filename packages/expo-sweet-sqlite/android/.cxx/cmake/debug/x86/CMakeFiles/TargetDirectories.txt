@@ -1,0 +1,3 @@
+/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86/CMakeFiles/rebuild_cache.dir
+/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86/CMakeFiles/edit_cache.dir
+/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86/CMakeFiles/cpp.dir

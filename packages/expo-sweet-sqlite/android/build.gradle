@@ -1,0 +1,100 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'maven'
+
+group = 'host.exp.exponent'
+version = '9.2.0'
+
+buildscript {
+  // Simple helper that allows the root project to override versions declared by this library.
+  ext.safeExtGet = { prop, fallback ->
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  }
+
+  repositories {
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${safeExtGet('kotlinVersion', '1.4.21')}")
+  }
+}
+
+// Upload android library to maven with javadoc and android sources
+configurations {
+  deployerJars
+}
+
+// Creating sources with comments
+task androidSourcesJar(type: Jar) {
+  classifier = 'sources'
+  from android.sourceSets.main.java.srcDirs
+}
+
+// Put the androidSources and javadoc to the artifacts
+artifacts {
+  archives androidSourcesJar
+}
+
+uploadArchives {
+  repositories {
+    mavenDeployer {
+      configuration = configurations.deployerJars
+      repository(url: mavenLocal().url)
+    }
+  }
+}
+
+android {
+  compileSdkVersion safeExtGet("compileSdkVersion", 30)
+
+//  externalNativeBuild {
+//    cmake {
+//      path "CMakeLists.txt"
+//    }
+//  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+
+  defaultConfig {
+    minSdkVersion safeExtGet("minSdkVersion", 21)
+    targetSdkVersion safeExtGet("targetSdkVersion", 30)
+    versionCode 18
+    versionName "9.2.0"
+
+//    externalNativeBuild {
+//      cmake {
+//        cppFlags "-O2 -frtti -fexceptions -Wall -fstack-protector-all"
+//        abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+//      }
+//    }
+
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+//repositories {
+//  mavenLocal()
+//  maven {
+//    // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+//    // new File(["node", "--print", "require.resolve('react-native/package.json')"].execute().text.trim(), "../android");
+//    //url("$rootDir/../node_modules/react-native/android")
+//    //url(new File(["node", "--print", "require.resolve('react-native/package.json')"].execute().text.trim(), "../android"))
+//  }
+//  google()
+//  jcenter()
+//}
+
+dependencies {
+  implementation project(':expo-modules-core')
+
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${safeExtGet('kotlinVersion', '1.4.21')}"
+
+  //noinspection GradleDynamicVersion
+  //implementation "com.facebook.react:react-native:+"  // From node_modules
+}

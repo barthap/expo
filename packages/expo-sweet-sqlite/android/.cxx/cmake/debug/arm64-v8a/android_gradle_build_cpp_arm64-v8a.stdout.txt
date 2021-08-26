@@ -1,0 +1,4 @@
+ninja: Entering directory `/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/arm64-v8a'
+[1/3] Building CXX object CMakeFiles/cpp.dir/Users/barthap/dev/expo/packages/expo-sweet-sqlite/cpp/example.cpp.o
+[2/3] Building CXX object CMakeFiles/cpp.dir/cpp-adapter.cpp.o
+[3/3] Linking CXX shared library ../../../../build/intermediates/cmake/debug/obj/arm64-v8a/libcpp.so

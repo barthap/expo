@@ -1,0 +1,4 @@
+# ninja log v5
+0	37	1629990603	CMakeFiles/cpp.dir/Users/barthap/dev/expo/packages/expo-sweet-sqlite/cpp/example.cpp.o	bd7ee54d10530b47
+2	63	1629990603	CMakeFiles/cpp.dir/cpp-adapter.cpp.o	201861f3d7fb2bd5
+63	111	1629990603	../../../../build/intermediates/cmake/debug/obj/x86_64/libcpp.so	44a589ef514cec21

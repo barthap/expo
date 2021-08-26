@@ -1,0 +1,210 @@
+{
+  "abi": "X86_64",
+  "abiPlatformVersion": 21,
+  "buildSettings": {
+    "environmentVariables": []
+  },
+  "cmake": {
+    "cmakeArtifactsBaseFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86_64",
+    "cmakeServerLogFile": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86_64/cmake_server_log.txt",
+    "cmakeWrappingBaseFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cxx/debug/x86_64",
+    "effectiveConfiguration": {
+      "name": "traditional-android-studio-cmake-environment",
+      "description": "Composite reified CMakeSettings configuration",
+      "generator": "Ninja",
+      "inheritEnvironments": [
+        "ndk"
+      ],
+      "buildRoot": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86_64",
+      "cmakeToolchain": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/android.toolchain.cmake",
+      "cmakeExecutable": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/cmake",
+      "variables": [
+        {
+          "name": "CMAKE_CXX_FLAGS",
+          "value": "-O2 -frtti -fexceptions -Wall -fstack-protector-all"
+        },
+        {
+          "name": "CMAKE_FIND_ROOT_PATH",
+          "value": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/prefab/x86_64/prefab"
+        },
+        {
+          "name": "CMAKE_BUILD_TYPE",
+          "value": "Debug"
+        },
+        {
+          "name": "CMAKE_TOOLCHAIN_FILE",
+          "value": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/android.toolchain.cmake"
+        },
+        {
+          "name": "ANDROID_ABI",
+          "value": "x86_64"
+        },
+        {
+          "name": "ANDROID_NDK",
+          "value": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858"
+        },
+        {
+          "name": "ANDROID_PLATFORM",
+          "value": "android-21"
+        },
+        {
+          "name": "CMAKE_ANDROID_ARCH_ABI",
+          "value": "x86_64"
+        },
+        {
+          "name": "CMAKE_ANDROID_NDK",
+          "value": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858"
+        },
+        {
+          "name": "CMAKE_EXPORT_COMPILE_COMMANDS",
+          "value": "ON"
+        },
+        {
+          "name": "CMAKE_LIBRARY_OUTPUT_DIRECTORY",
+          "value": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/build/intermediates/cmake/debug/obj/x86_64"
+        },
+        {
+          "name": "CMAKE_MAKE_PROGRAM",
+          "value": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/ninja"
+        },
+        {
+          "name": "CMAKE_SYSTEM_NAME",
+          "value": "Android"
+        },
+        {
+          "name": "CMAKE_SYSTEM_VERSION",
+          "value": "21"
+        }
+      ]
+    }
+  },
+  "cxxBuildFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86_64",
+  "info": {
+    "abi": "X86_64",
+    "bitness": 64,
+    "deprecated": false,
+    "default": true
+  },
+  "originalCxxBuildFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86_64",
+  "variant": {
+    "buildSystemArgumentList": [],
+    "buildTargetSet": [],
+    "implicitBuildTargetSet": [],
+    "cFlagsList": [],
+    "cmakeSettingsConfiguration": "android-gradle-plugin-predetermined-name",
+    "cppFlagsList": [
+      "-O2 -frtti -fexceptions -Wall -fstack-protector-all"
+    ],
+    "isDebuggableEnabled": true,
+    "module": {
+      "buildSystem": "CMAKE",
+      "cmake": {
+        "cmakeExe": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/cmake",
+        "minimumCmakeVersion": "3.10.2",
+        "ninjaExe": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/ninja"
+      },
+      "cmakeToolchainFile": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/android.toolchain.cmake",
+      "cxxFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx",
+      "gradleModulePathName": ":expo-sweet-sqlite",
+      "intermediatesFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/build/intermediates",
+      "makeFile": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/CMakeLists.txt",
+      "moduleBuildFile": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/build.gradle",
+      "moduleRootFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android",
+      "ndkDefaultAbiList": [
+        "ARMEABI_V7A",
+        "ARM64_V8A",
+        "X86",
+        "X86_64"
+      ],
+      "ndkFolder": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858",
+      "ndkMetaAbiList": [
+        {
+          "abi": "ARMEABI_V7A",
+          "bitness": 32,
+          "deprecated": false,
+          "default": true
+        },
+        {
+          "abi": "ARM64_V8A",
+          "bitness": 64,
+          "deprecated": false,
+          "default": true
+        },
+        {
+          "abi": "X86",
+          "bitness": 32,
+          "deprecated": false,
+          "default": true
+        },
+        {
+          "abi": "X86_64",
+          "bitness": 64,
+          "deprecated": false,
+          "default": true
+        }
+      ],
+      "ndkMetaPlatforms": {
+        "min": 16,
+        "max": 31,
+        "aliases": {
+          "20": 19,
+          "25": 24,
+          "J": 16,
+          "J-MR1": 17,
+          "J-MR2": 18,
+          "K": 19,
+          "L": 21,
+          "L-MR1": 22,
+          "M": 23,
+          "N": 24,
+          "N-MR1": 24,
+          "O": 26,
+          "O-MR1": 27,
+          "P": 28,
+          "Q": 29,
+          "R": 30,
+          "S": 31
+        }
+      },
+      "ndkSupportedAbiList": [
+        "ARMEABI_V7A",
+        "ARM64_V8A",
+        "X86",
+        "X86_64"
+      ],
+      "ndkDefaultStl": "LIBCXX_STATIC",
+      "ndkVersion": "23.0.7599858",
+      "project": {
+        "compilerSettingsCacheFolder": "/Users/barthap/dev/expo/apps/bare-sandbox/android/.cxx",
+        "cxxFolder": "/Users/barthap/dev/expo/apps/bare-sandbox/android/.cxx",
+        "ideBuildTargetAbi": "x86_64,x86,arm64-v8a,armeabi-v7a,armeabi",
+        "isBuildOnlyTargetAbiEnabled": true,
+        "isCmakeBuildCohabitationEnabled": false,
+        "isNativeCompilerSettingsCacheEnabled": false,
+        "rootBuildGradleFolder": "/Users/barthap/dev/expo/apps/bare-sandbox/android",
+        "sdkFolder": "/Users/barthap/Library/Android/sdk",
+        "isPrefabEnabled": false
+      },
+      "splitsAbiFilterSet": [],
+      "stlSharedObjectMap": {
+        "LIBCXX_SHARED": {
+          "ARMEABI_V7A": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so",
+          "ARM64_V8A": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so",
+          "X86": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/i686-linux-android/libc++_shared.so",
+          "X86_64": "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so"
+        },
+        "LIBCXX_STATIC": {},
+        "NONE": {},
+        "SYSTEM": {}
+      }
+    },
+    "objFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/build/intermediates/cmake/debug/obj",
+    "variantName": "debug",
+    "validAbiList": [
+      "X86_64"
+    ],
+    "prefabDirectory": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/prefab",
+    "prefabPackageDirectoryList": []
+  },
+  "prefabFolder": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/prefab/x86_64"
+}

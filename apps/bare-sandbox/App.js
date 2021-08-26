@@ -1,6 +1,10 @@
 import * as DevMenu from 'expo-dev-menu';
+import { NativeModulesProxy } from 'expo-modules-core';
 import { StatusBar } from 'expo-status-bar';
+import * as React from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+
+const { SweetSQLite } = NativeModulesProxy;
 
 const Button = ({ label, onPress }) => (
   <TouchableOpacity style={styles.buttonContainer} onPress={onPress}>
@@ -9,6 +13,9 @@ const Button = ({ label, onPress }) => (
 );
 
 export default function App() {
+  React.useEffect(() => {
+    SweetSQLite.multiply(2, 3).then(console.log);
+  });
   return (
     <View style={styles.container}>
       <Text>Open up App.js to start working on your app!</Text>

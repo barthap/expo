@@ -1,0 +1,22 @@
+{
+  "buildFiles": [
+    "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/CMakeLists.txt",
+    "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/android.toolchain.cmake",
+    "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/android-legacy.toolchain.cmake",
+    "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/platforms.cmake",
+    "/Users/barthap/Library/Android/sdk/ndk/23.0.7599858/build/cmake/compiler_id.cmake"
+  ],
+  "cleanCommands": [
+    "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86\" clean"
+  ],
+  "buildTargetsCommand": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/ninja  -C \"/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86\" {LIST_OF_TARGETS_TO_BUILD}",
+  "libraries": {
+    "cpp-Debug-x86": {
+      "artifactName": "cpp",
+      "buildCommand": "/Users/barthap/Library/Android/sdk/cmake/3.10.2.4988404/bin/ninja -C \"/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/.cxx/cmake/debug/x86\" cpp",
+      "abi": "x86",
+      "output": "/Users/barthap/dev/expo/packages/expo-sweet-sqlite/android/build/intermediates/cmake/debug/obj/x86/libcpp.so",
+      "runtimeFiles": []
+    }
+  }
+}
