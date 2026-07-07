@@ -3,24 +3,53 @@ import { requireNativeModule } from 'expo';
 import type { BlobPart, ExpoBlobModule } from './ExpoBlob.types';
 import {
   DEFAULT_CHUNK_SIZE,
+  isBlobLike,
   isTypedArray,
   normalizedContentType,
   preprocessOptions,
 } from './utils';
 
+const NativeBlobModule = requireNativeModule<ExpoBlobModule>('ExpoBlob');
+
 const inputMapping = (blobPart: BlobPart) => {
   if (blobPart instanceof ArrayBuffer) {
     return new Uint8Array(blobPart);
   }
-  if (blobPart instanceof Blob || isTypedArray(blobPart)) {
+  if (isTypedArray(blobPart)) {
     return blobPart;
+  }
+  // Prototype chain check instead of `instanceof Blob`: `Symbol.hasInstance` below also
+  // matches duck-typed Blob-like objects, but only actual native Blob instances can be
+  // passed to the native constructor.
+  if (Object.prototype.isPrototypeOf.call(NativeBlobModule.Blob.prototype, blobPart)) {
+    return blobPart;
+  }
+  if (isBlobLike(blobPart)) {
+    throw new TypeError(
+      'Blob-like objects (such as expo-file-system File) cannot be passed to the Blob ' +
+        'constructor directly, because their bytes cannot be read synchronously. ' +
+        'Read the data first, for example: new Blob([await file.bytes()]).'
+    );
   }
   return String(blobPart);
 };
 
-const NativeBlobModule = requireNativeModule<ExpoBlobModule>('ExpoBlob');
-
 export class Blob extends NativeBlobModule.Blob {
+  static [Symbol.hasInstance](instance: any): boolean {
+    // Subclasses inherit this method, but duck-typing must not apply to them: `instanceof Sub`
+    // has to keep meaning "built by Sub". Fall back to the ordinary prototype-chain check,
+    // which does not look up `Symbol.hasInstance` again and so cannot recurse.
+    if (this !== Blob) {
+      return Function.prototype[Symbol.hasInstance].call(this, instance);
+    }
+    // Real Blob instances (checked without `instanceof` to avoid recursing into this method)
+    if (Object.prototype.isPrototypeOf.call(Blob.prototype, instance)) {
+      return true;
+    }
+    // Duck-typed Blob-like implementations, such as expo-file-system's File
+    return isBlobLike(instance);
+  }
+
   constructor(blobParts?: BlobPart[] | Iterable<BlobPart>, options?: BlobPropertyBag) {
     if (!new.target) {
       throw new TypeError("Blob constructor requires 'new' operator");
@@ -105,6 +134,10 @@ export class Blob extends NativeBlobModule.Blob {
 
   toString(): string {
     return '[object Blob]';
+  }
+
+  get [Symbol.toStringTag](): string {
+    return 'Blob';
   }
 
   // Changed the length property to match that of the default js implementation

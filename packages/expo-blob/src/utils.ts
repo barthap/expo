@@ -92,3 +92,27 @@ export const preprocessOptions = (options?: BlobPropertyBag): BlobPropertyBag | 
  * @see [Node.js commit: set default chunk size to 64kB](https://github.com/nodejs/node/commit/1abff073921bcb0631602032aef0135bccfaee0d#diff-b290649355ee6b2639720a644520e93878144584f931f60f06d5c15eecd9067fR12)
  */
 export const DEFAULT_CHUNK_SIZE = 65_536;
+
+/**
+ * Checks whether the given value implements the `Blob` interface shape, without requiring
+ * it to inherit from any particular `Blob` class. Matches objects like `expo-file-system`'s
+ * `File`, which implement Blob methods but have their own prototype chain.
+ *
+ * This is the single source of truth for "Blob-like" duck-typing — keep `Blob[Symbol.hasInstance]`
+ * and expo's fetch body normalization in sync through this predicate.
+ *
+ * @param value The value to check.
+ * @returns `true` if the value is Blob-like, `false` otherwise.
+ */
+export function isBlobLike(value: any): boolean {
+  return (
+    value != null &&
+    typeof value === 'object' &&
+    typeof value.arrayBuffer === 'function' &&
+    typeof value.slice === 'function' &&
+    typeof value.text === 'function' &&
+    typeof value.size === 'number' &&
+    // `expo-file-system`'s `File.type` is `null` when the extension maps to no known MIME type
+    (typeof value.type === 'string' || value.type === null)
+  );
+}
