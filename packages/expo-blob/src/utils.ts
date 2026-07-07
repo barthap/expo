@@ -105,6 +105,13 @@ export const DEFAULT_CHUNK_SIZE = 65_536;
  * @returns `true` if the value is Blob-like, `false` otherwise.
  */
 export function isBlobLike(value: any): boolean {
+  // React Native's built-in Blob (produced by RN XHR with `responseType: 'blob'` or
+  // WebSocket with `binaryType: 'blob'`) lacks `arrayBuffer()`/`text()` — its bytes live
+  // in the native blob store keyed by `data.blobId` and are read through FileReader.
+  // Recognize it by that shape so RN-produced blobs keep passing `instanceof Blob`.
+  if (isReactNativeBlob(value)) {
+    return true;
+  }
   return (
     value != null &&
     typeof value === 'object' &&
@@ -115,4 +122,29 @@ export function isBlobLike(value: any): boolean {
     // `expo-file-system`'s `File.type` is `null` when the extension maps to no known MIME type
     (typeof value.type === 'string' || value.type === null)
   );
+}
+
+/**
+ * Checks whether the given value is a React Native built-in `Blob`
+ * (`react-native/Libraries/Blob/Blob.js`).
+ *
+ * RN keeps the native handle in the `_data` own property and exposes it through a `data`
+ * getter that throws once `close()` released it — as do the `size` and `type` getters, which
+ * read through `data`. Since `instanceof` must never throw, the `data` read is guarded, and a
+ * closed blob still counts as a Blob: releasing the bytes does not change what class the
+ * object belongs to, and the web platform has no `close()` at all.
+ */
+function isReactNativeBlob(value: any): boolean {
+  if (value == null || typeof value !== 'object' || typeof value.slice !== 'function') {
+    return false;
+  }
+  let data: any;
+  try {
+    data = value.data;
+  } catch {
+    // The `data` getter threw, which is what RN does after `close()`. Fall back to the
+    // backing field, which `close()` sets to `null` and which has no getter to throw.
+    return typeof value.close === 'function' && value._data === null;
+  }
+  return typeof data?.blobId === 'string' && typeof value.size === 'number';
 }
