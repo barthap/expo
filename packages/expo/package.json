@@ -30,11 +30,14 @@
     "build",
     "internal",
     "ios",
+    "mocks",
     "scripts",
     "src",
     "AppEntry.js",
     "Expo.podspec",
     "Package.swift",
+    "blob.js",
+    "blob.d.ts",
     "bundledNativeModules.json",
     "expo-module.config.json",
     "metro-config.js",
@@ -111,6 +114,14 @@
     "./internal/*": {
       "types": "./internal/*.d.ts",
       "default": "./internal/*.js"
+    },
+    "./blob": {
+      "types": {
+        "expo-source": "./src/blob/index.ts",
+        "default": "./build/blob/index.d.ts"
+      },
+      "expo-source": "./src/blob/index.ts",
+      "default": "./build/blob/index.js"
     },
     "./dom": {
       "types": {
@@ -215,6 +226,8 @@
     "clean": "rimraf build",
     "lint": "oxlint --config oxlint.config.mjs .",
     "format": "expo-module format",
+    "swift:format": "../../scripts/swift-format.sh ios/Expo/Blob",
+    "swift:lint": "../../scripts/swift-format.sh --lint ios/Expo/Blob",
     "test": "jest && jest --config scripts/spm/jest.config.js && pnpm test:templates",
     "test:spm-plugin": "jest --config scripts/spm/jest.config.js",
     "test:templates": "et check-template-packages",

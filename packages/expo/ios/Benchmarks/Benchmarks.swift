@@ -1,6 +1,6 @@
 // Copyright 2026-present 650 Industries. All rights reserved.
 
-import ExpoBlob
+import Expo
 import ExpoModulesCore
 import ExpoModulesTestCore
 import Testing
@@ -8,7 +8,7 @@ import Testing
 /// Umbrella suite for the ExpoBlob benchmarks.
 ///
 /// The benchmarks are the `Benchmarks` test spec of the pod, separate from the unit tests. Run them
-/// with `et native-unit-tests -p ios --packages expo-blob --benchmarks`, which builds the pods in
+/// with `et native-unit-tests -p ios --packages expo --benchmarks`, which builds the pods in
 /// the Release configuration and runs the bundle natively on the Mac through the Mac Catalyst
 /// destination. Each case prints one `[benchmark]` line with the median and minimum ns/op.
 ///

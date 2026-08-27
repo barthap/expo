@@ -3,7 +3,7 @@
 import ExpoModulesTestCore
 import Testing
 
-@testable import ExpoBlob
+@testable import Expo
 @testable import ExpoModulesCore
 
 @Suite("Blob")

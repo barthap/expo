@@ -109,7 +109,6 @@ Each of these has an `spm.config.json` in its package root:
 | `expo-background-fetch` | `ExpoBackgroundFetch` |
 | `expo-background-task` | `ExpoBackgroundTask` |
 | `expo-battery` | `ExpoBattery` |
-| `expo-blob` | `ExpoBlob` |
 | `expo-blur` | `ExpoBlur` |
 | `expo-brightness` | `ExpoBrightness` |
 | `expo-brownfield` | `ExpoBrownfield` |

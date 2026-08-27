@@ -106,7 +106,7 @@ Pod::Spec.new do |s|
   install_modules_dependencies(s)
 
   s.source_files = 'ios/**/*.{h,m,mm,swift}'
-  s.exclude_files = 'ios/Tests'
+  s.exclude_files = ['ios/Tests', 'ios/Benchmarks']
   s.compiler_flags = compiler_flags
   s.private_header_files = ['ios/**/Swift.h']
 
@@ -118,6 +118,16 @@ Pod::Spec.new do |s|
     # The test bundle links static libraries containing C++ (e.g. ReactCodegen's
     # generated component descriptors), but has no C++ sources of its own, so the
     # driver won't add the C++ runtime — link libc++ explicitly.
+    test_spec.pod_target_xcconfig = {
+      'OTHER_LDFLAGS' => '$(inherited) -lc++',
+    }
+  end
+
+  # Performance benchmarks, run with `et native-unit-tests --benchmarks`. A separate spec, so unit
+  # test runs neither build nor run them.
+  s.test_spec 'Benchmarks' do |test_spec|
+    test_spec.dependency 'ExpoModulesTestCore'
+    test_spec.source_files = 'ios/Benchmarks'
     test_spec.pod_target_xcconfig = {
       'OTHER_LDFLAGS' => '$(inherited) -lc++',
     }

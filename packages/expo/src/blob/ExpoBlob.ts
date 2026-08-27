@@ -1,4 +1,4 @@
-import { requireNativeModule } from 'expo';
+import { requireNativeModule } from 'expo-modules-core';
 
 import type { BlobPart, ExpoBlobModule } from './ExpoBlob.types';
 import {

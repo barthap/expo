@@ -219,7 +219,7 @@ export const PACKAGES_MAPPING: Record<string, CommandAdditionalParams> = {
   'expo-battery': ['Battery.ts'],
   'expo-barometer': [['Barometer.ts', 'DeviceSensor.ts'], 'expo-sensors'],
   'expo-blur': ['index.ts'],
-  'expo-blob': ['ExpoBlob.types.ts'],
+  'expo-blob': ['blob/ExpoBlob.types.ts', 'expo'],
   'expo-type-information': ['index.ts'],
   'expo-brightness': ['Brightness.ts'],
   'expo-brownfield': ['index.ts'],

@@ -1,9 +1,11 @@
 {
   "extends": "@expo/internal-scripts/tsconfig.base",
   "compilerOptions": {
-    "rootDir": "./src",
+    // `rootDir` spans both `src` and the hand-maintained `mocks/` module, which
+    // the native tests import directly (e.g. `../../../mocks/ExpoBlob`).
+    "rootDir": ".",
     "noEmit": true,
     "emitDeclarationOnly": true
   },
-  "include": ["./src"]
+  "include": ["./src", "./mocks"]
 }

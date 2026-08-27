@@ -2,6 +2,8 @@
 
 A Expo package that provides a Blob implementation for handling binary data, similar to the web Blob API.
 
+The implementation lives in the `expo` package. `expo-blob` re-exports it from `expo/blob` and ships no native code of its own.
+
 # Installation in managed Expo projects
 
 For [managed](https://docs.expo.dev/archive/managed-vs-bare/) Expo projects, please follow the installation instructions in the [API documentation for the latest stable release](https://docs.expo.dev/versions/latest/sdk/blob/).
@@ -22,7 +24,7 @@ No additional set up necessary.
 
 ### Configure for iOS
 
-Run `npx pod-install` after installing the npm package.
+No additional set up necessary.
 
 ## Usage
 

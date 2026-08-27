@@ -1,4 +1,4 @@
-import { NativeModule, SharedObject } from 'expo';
+import type { NativeModule, SharedObject } from 'expo-modules-core';
 
 export declare class Blob {
   /**
