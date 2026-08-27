@@ -1,5 +1,5 @@
 import { blobToArrayBufferAsync } from '../../utils/blobUtils';
-import type { ExpoFormDataValue } from '../FormData';
+import type { ExpoFormDataEntry } from '../FormData';
 
 function encodeFilename(filename: string): string {
   return encodeURIComponent(filename.replace(/\//g, '_'));
@@ -10,7 +10,8 @@ type ExpoFormHeaders = {
   'content-type': string | undefined;
 };
 
-function getFormDataPartHeaders(part: ExpoFormDataValue, name: string) {
+function getFormDataPartHeaders(entry: ExpoFormDataEntry) {
+  const [name, part, entryFilename] = entry;
   const contentDisposition = 'form-data; name="' + name + '"';
 
   const headers: ExpoFormHeaders = {
@@ -19,8 +20,12 @@ function getFormDataPartHeaders(part: ExpoFormDataValue, name: string) {
   };
 
   if (typeof part === 'object') {
-    if ('name' in part && typeof part.name === 'string') {
-      headers['content-disposition'] += `; filename="${encodeFilename(part.name)}"`;
+    // The filename resolved when the entry was appended wins. Other FormData implementations
+    // don't carry one, so fall back to the value's own `name`, as React Native does.
+    const filename =
+      entryFilename ?? ('name' in part && typeof part.name === 'string' ? part.name : undefined);
+    if (filename !== undefined) {
+      headers['content-disposition'] += `; filename="${encodeFilename(filename)}"`;
     }
     if ('type' in part && typeof part.type === 'string') {
       headers['content-type'] = part.type;
@@ -54,25 +59,31 @@ export async function convertFormDataAsync(
       throw new Error('Unsupported FormData implementation');
     }
   }
-  // @ts-expect-error: React Native's FormData is not 100% compatible with ours
-  const entries: [string, ExpoFormDataValue][] = formData.entries();
+  // Our patched FormData keeps the filename of each entry as a third element of React Native's
+  // internal `_parts` tuples. `entries()` deliberately hides it, so read the tuples directly.
+  const internalParts = (formData as { _parts?: ExpoFormDataEntry[] })._parts;
+  const entries: Iterable<ExpoFormDataEntry> = Array.isArray(internalParts)
+    ? internalParts
+    : // React Native's FormData is not 100% compatible with ours.
+      (formData.entries() as unknown as Iterable<ExpoFormDataEntry>);
 
   const results: (Uint8Array | string)[] = [];
-  for (const [name, entry] of entries) {
+  for (const entry of entries) {
+    const value = entry[1];
     results.push(`--${boundary}\r\n`);
-    for (const [headerKey, headerValue] of Object.entries(getFormDataPartHeaders(entry, name))) {
+    for (const [headerKey, headerValue] of Object.entries(getFormDataPartHeaders(entry))) {
       if (headerValue) {
         results.push(`${headerKey}: ${headerValue}\r\n`);
       }
     }
     results.push(`\r\n`);
-    if (typeof entry === 'string') {
-      results.push(entry);
-    } else if (entry instanceof Blob) {
-      results.push(new Uint8Array(await blobToArrayBufferAsync(entry)));
-    } else if (typeof entry === 'object' && 'bytes' in entry) {
+    if (typeof value === 'string') {
+      results.push(value);
+    } else if (value instanceof Blob) {
+      results.push(new Uint8Array(await blobToArrayBufferAsync(value)));
+    } else if (typeof value === 'object' && 'bytes' in value) {
       // @ts-expect-error: File or ExpoBlob don't extend Blob but implement the interface.
-      results.push(await entry.bytes());
+      results.push(await value.bytes());
     } else {
       throw new Error('Unsupported FormDataPart implementation');
     }

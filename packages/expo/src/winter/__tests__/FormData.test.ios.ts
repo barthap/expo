@@ -1,8 +1,15 @@
 /* eslint-disable no-global-assign */
-import type { ExpoFormData } from '../FormData';
+import { Blob as ExpoBlob } from '../../blob';
+import { File as ExpoFile } from '../File';
+import type { ExpoFormData, ExpoFormDataEntry } from '../FormData';
 
 const { installFormDataPatch } = jest.requireActual('../FormData');
 const jestFormDataPolyfill = FormData;
+
+/** Reads the internal entries, including the per-entry filename that `entries()` hides. */
+function getFormDataEntries(formData: ExpoFormData): ExpoFormDataEntry[] {
+  return (formData as unknown as { _parts: ExpoFormDataEntry[] })._parts;
+}
 
 // NOTE(@kitten): We need to overload the `append` method additions on the NodeJS type as well,
 // since it'll be available in this TypeScript environment
@@ -68,6 +75,74 @@ describe('FormData', () => {
         type: 'image/jpeg',
         name: 'test.jpg',
       });
+    });
+  });
+
+  describe('entry filenames', () => {
+    it(`uses the filename argument and leaves the value untouched`, () => {
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      a.append('a', file as unknown as Blob, 'override.txt');
+
+      expect(getFormDataEntries(a)).toEqual([['a', file, 'override.txt']]);
+      // The caller's File must not be renamed by appending it.
+      expect(file.name).toBe('original.txt');
+    });
+
+    it(`does not throw when appending a File with a filename`, () => {
+      // Regression: the filename used to be smuggled through `value.name`, which throws
+      // `TypeError: Cannot assign to property 'name' which has only a getter` in strict mode
+      // now that `File.name` is a getter-only prototype accessor.
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      expect(() => a.append('a', file as unknown as Blob, 'override.txt')).not.toThrow();
+    });
+
+    it(`keeps per-entry filenames when the same File is appended twice`, () => {
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      a.append('a', file as unknown as Blob, 'first.txt');
+      a.append('b', file as unknown as Blob, 'second.txt');
+
+      expect(getFormDataEntries(a)).toEqual([
+        ['a', file, 'first.txt'],
+        ['b', file, 'second.txt'],
+      ]);
+      expect(file.name).toBe('original.txt');
+    });
+
+    it(`falls back to the File name when no filename is given`, () => {
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      a.append('a', file as unknown as Blob);
+
+      expect(getFormDataEntries(a)).toEqual([['a', file, 'original.txt']]);
+    });
+
+    it(`falls back to "blob" for a Blob without a name`, () => {
+      const a = new FormData() as ExpoFormData;
+      const blob = new ExpoBlob(['hello']);
+      a.append('a', blob as unknown as Blob);
+
+      expect(getFormDataEntries(a)).toEqual([['a', blob, 'blob']]);
+    });
+
+    it(`carries the filename through set`, () => {
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      a.append('a', 'placeholder');
+      a.set('a', file as unknown as Blob, 'override.txt');
+
+      expect(getFormDataEntries(a)).toEqual([['a', file, 'override.txt']]);
+      expect(file.name).toBe('original.txt');
+    });
+
+    it(`does not expose the filename through entries`, () => {
+      const a = new FormData() as ExpoFormData;
+      const file = new ExpoFile(['hello'], 'original.txt');
+      a.append('a', file as unknown as Blob, 'override.txt');
+
+      expect([...a.entries()]).toEqual([['a', file]]);
     });
   });
 

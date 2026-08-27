@@ -32,6 +32,21 @@ installFormDataPatch(FormData);
 // @ts-expect-error: readonly property only applies when the engine supports it
 Symbol.asyncIterator ??= Symbol.for('Symbol.asyncIterator');
 
+const useRnBlob =
+  process.env.EXPO_PUBLIC_USE_RN_BLOB === '1' || process.env.EXPO_PUBLIC_USE_RN_BLOB === 'true';
+
+if (!useRnBlob) {
+  // Override the global Blob with the W3C-compliant implementation from `expo/blob`, which
+  // supports ArrayBuffer and TypedArray parts and the full read API (arrayBuffer, bytes,
+  // text, stream).
+  // https://w3c.github.io/FileAPI/#blob-section
+  install('Blob', () => require('../blob').Blob);
+  // The global File must extend the global Blob, so React Native's File polyfill
+  // (which extends React Native's built-in Blob) is replaced together with it.
+  // https://w3c.github.io/FileAPI/#file-section
+  install('File', () => require('./File').File);
+}
+
 const useRnFetch =
   process.env.EXPO_PUBLIC_USE_RN_FETCH === '1' || process.env.EXPO_PUBLIC_USE_RN_FETCH === 'true';
 

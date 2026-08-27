@@ -11,7 +11,7 @@ export function isReactNativeBlobGlobal(): boolean {
 /**
  * react-native's `Blob` cannot be created from binary data in JS, so store the
  * bytes in its native blob store and reference them, like XHR responses do.
- * TODO(kudo,20260706): remove this when we install expo-blob as globalThis.Blob
+ * Only used when the app opts out of Expo's global `Blob` with `EXPO_PUBLIC_USE_RN_BLOB`.
  */
 export async function createReactNativeBlobAsync(buffer: ArrayBuffer, type: string): Promise<Blob> {
   const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;

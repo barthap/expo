@@ -369,7 +369,7 @@ export class FetchResponse extends ConcreteNativeResponse implements Response {
       if (__DEV__ && !hasWarnedAboutReactNativeBlob) {
         hasWarnedAboutReactNativeBlob = true;
         console.warn(
-          "Response.blob() is using React Native's Blob, which copies the response into the native blob store and reads it back through base64 encoding. This may be slow for large responses. Add the `expo-blob` package to your app to avoid the performance overhead."
+          "Response.blob() is using React Native's Blob, which copies the response into the native blob store and reads it back through base64 encoding. This may be slow for large responses. This happens when `EXPO_PUBLIC_USE_RN_BLOB` is set; unset it to use Expo's Blob instead."
         );
       }
       return createReactNativeBlobAsync(buffer, type);

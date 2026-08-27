@@ -3,6 +3,7 @@
 import RNFormData from 'react-native/Libraries/Network/FormData';
 import { TextDecoder, TextEncoder } from 'util';
 
+import { File as ExpoFile } from '../../File';
 import { createBoundary, convertFormDataAsync, joinUint8Arrays } from '../convertFormData';
 
 declare namespace globalThis {
@@ -54,6 +55,33 @@ describe(convertFormDataAsync, () => {
       "
     `);
     expect(resultBoundary).toBe(boundary);
+  });
+
+  it(`should use the per-entry filename instead of the File name`, async () => {
+    const formData = new ExpoFormData();
+    const file = new ExpoFile(['hello file'], 'original.txt', { type: 'text/plain' });
+    formData.append('file', file, 'override.txt');
+    const boundary = '----ExpoFetchFormBoundary0000000000000000';
+    const { body } = await convertFormDataAsync(formData, boundary);
+    expect(new TextDecoder().decode(body)).toContain(
+      'content-disposition: form-data; name="file"; filename="override.txt"'
+    );
+    expect(file.name).toBe('original.txt');
+  });
+
+  it(`should give each entry its own filename when the same File is appended twice`, async () => {
+    const formData = new ExpoFormData();
+    const file = new ExpoFile(['hello file'], 'original.txt', { type: 'text/plain' });
+    formData.append('first', file, 'first.txt');
+    formData.append('second', file);
+    const boundary = '----ExpoFetchFormBoundary0000000000000000';
+    const { body } = await convertFormDataAsync(formData, boundary);
+    const text = new TextDecoder().decode(body);
+    expect(text).toContain('content-disposition: form-data; name="first"; filename="first.txt"');
+    expect(text).toContain(
+      'content-disposition: form-data; name="second"; filename="original.txt"'
+    );
+    expect(file.name).toBe('original.txt');
   });
 
   it(`should convert expo-file-system FileBlob`, async () => {

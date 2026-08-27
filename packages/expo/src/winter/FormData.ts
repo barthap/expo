@@ -2,8 +2,21 @@
 // https://github.com/facebook/react-native/blob/42dcfdd2cdb59fe545523cb57db6ee32a96b9298/packages/react-native/Libraries/Network/FormData.js#L1
 // https://github.com/facebook/react/blob/985747f81033833dca22f30b0c04704dd4bd3714/packages/react-client/src/ReactFlightReplyClient.js#L212
 
+import { isBlobLike } from '../blob/utils';
+
+/**
+ * An entry in React Native's `_parts` array, extended with the filename resolved from the
+ * optional third argument of `append(name, value, filename)`.
+ *
+ * The filename is kept per entry instead of being written onto the value, so that appending
+ * the same `File` twice under different filenames yields two entries and never renames the
+ * caller's object. React Native's own `getAll()` and `getParts()` destructure `[name, value]`
+ * and ignore the extra element.
+ */
+export type ExpoFormDataEntry = [name: string, value: ExpoFormDataValue, filename?: string];
+
 type ReactNativeFormDataInternal = FormData & {
-  _parts: [string, string | Blob][];
+  _parts: ExpoFormDataEntry[];
 };
 
 export type ExpoFormDataValue = string | Blob;
@@ -67,22 +80,18 @@ function ensureMinArgCount(name: string, args: any[], expected: number) {
   }
 }
 
-function normalizeArgs(
-  name: string,
-  value: any,
-  blobFilename: string | undefined
-): [string, File | string] {
-  if (value instanceof Blob) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, 'name');
-
-    if (descriptor && descriptor.writable) {
-      // @ts-expect-error: `name` is not accessible in blob
-      value.name = blobFilename ?? value.name ?? 'blob';
-    } else if (!descriptor && Object.isExtensible(value)) {
-      // @ts-expect-error: `name` is not accessible in blob
-      value.name = blobFilename ?? 'blob';
-    }
-  } else if (typeof value !== 'object') {
+function normalizeArgs(name: string, value: any, blobFilename: any): ExpoFormDataEntry {
+  if (isBlobLike(value)) {
+    // Matches the web: the `filename` argument wins, then the `File` name, then `'blob'`.
+    const filename =
+      blobFilename !== undefined
+        ? String(blobFilename)
+        : typeof value.name === 'string'
+          ? value.name
+          : 'blob';
+    return [String(name), value, filename];
+  }
+  if (typeof value !== 'object') {
     value = String(value);
   }
   return [String(name), value];
@@ -190,9 +199,10 @@ export function installFormDataPatch(formData: typeof FormData): typeof ExpoForm
     this: ReactNativeFormDataInternal
   ): IterableIterator<[string, FormDataEntryValue]> {
     for (const part of this._parts) {
+      // Only the name/value pair is exposed — the third element is the internal filename.
       // @ts-expect-error: We don't perform correct normalization when setting the args so the return value will
       // not be a normalized File object.
-      yield part;
+      yield [part[0], part[1]];
     }
   };
 

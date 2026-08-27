@@ -95,8 +95,19 @@ URL.createObjectURL = function createObjectURL(
   if (getBlobUrlPrefix() == null) {
     throw new Error('Cannot create URL for blob');
   }
-  return `${getBlobUrlPrefix()}${encodeURIComponent(blob.data!.blobId)}?offset=${encodeURIComponent(
-    blob.data!.offset
+  if (blob?.data?.blobId == null) {
+    // Only React Native's built-in Blob stores its bytes in the native blob store that
+    // backs these URLs. The `expo/blob` Blob installed as the global doesn't yet, so there
+    // is no native endpoint that could serve its bytes.
+    throw new Error(
+      'URL.createObjectURL is not supported for this Blob implementation, because its ' +
+        'bytes are not registered in the native blob store that serves blob: URLs. ' +
+        'Read the data directly instead (e.g. `await blob.arrayBuffer()`), or write it ' +
+        'to a file with expo-file-system and use the file URI.'
+    );
+  }
+  return `${getBlobUrlPrefix()}${encodeURIComponent(blob.data.blobId)}?offset=${encodeURIComponent(
+    blob.data.offset
   )}&size=${encodeURIComponent(blob.size)}`;
 };
 

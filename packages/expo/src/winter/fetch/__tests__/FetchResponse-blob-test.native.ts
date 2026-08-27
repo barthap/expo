@@ -55,7 +55,7 @@ describe('FetchResponse blob() with react-native Blob', () => {
       await makeResponse().blob();
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('expo-blob'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('EXPO_PUBLIC_USE_RN_BLOB'));
     } finally {
       warnSpy.mockRestore();
     }
