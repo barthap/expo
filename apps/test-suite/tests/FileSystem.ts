@@ -2374,12 +2374,9 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         body: formData,
       });
       const body = await response.json();
-      // TODO: This is the expected behavior, but following [spec](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#create-an-entry)
-      // would require us to create a new File object when setting filename – we could make it work only if File is available in (global.expo)
-      // expect(body.data.match(/filename="([^"]+)"/)[1]).toEqual('FileName.txt');
-
-      // this is invalid
-      expect(body.data.match(/filename="([^"]+)"/)[1]).toEqual('file.txt');
+      // Per the [spec](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#create-an-entry),
+      // the filename argument takes precedence over the file's own name.
+      expect(body.data.match(/filename="([^"]+)"/)[1]).toEqual('FileName.txt');
     });
   });
 
