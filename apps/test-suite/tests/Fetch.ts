@@ -49,16 +49,11 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(blob.type).toBe('application/octet-stream');
     });
 
-    it('should read blob content back through FileReader', async () => {
+    it('should read blob content back', async () => {
       const resp = await fetch('https://httpbin.io/base64/aGVsbG8gYmxvYg==');
       const blob = await resp.blob();
-      const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(blob);
-      });
-      expect(new TextDecoder().decode(buffer)).toBe('hello blob');
+      expect(await blob.text()).toBe('hello blob');
+      expect(new TextDecoder().decode(await blob.arrayBuffer())).toBe('hello blob');
     });
 
     it('should process response in readablestream from late get reader call', async () => {
