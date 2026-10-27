@@ -38,7 +38,9 @@ export declare class Blob {
    */
   text(): Promise<string>;
   /**
-   * > **Note**: The current implementation loads the entire `Blob` into memory before streaming.
+   * Reads the `Blob` in chunks of up to 64 KiB, or up to the size of the view for a BYOB reader,
+   * so a `Blob` that reads from a file, such as the result of `File.slice()` from
+   * `expo-file-system`, is not loaded into memory all at once.
    * @returns A `ReadableStream` of the `Blob`'s data.
    */
   stream(): ReadableStream;

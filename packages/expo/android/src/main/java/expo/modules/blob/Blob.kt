@@ -58,9 +58,9 @@ internal class Blob(val blobParts: List<InternalBlobPart> = listOf(), rawType: S
       return this
     }
     return when (this) {
-      is InternalBlobPart.StringWrapper -> InternalBlobPart.BufferWrapper(cachedBytes.slice(startIndex..<endIndex).toByteArray())
+      is InternalBlobPart.StringWrapper -> InternalBlobPart.BufferWrapper(cachedBytes.copyOfRange(startIndex, endIndex))
       is InternalBlobPart.BlobWrapper -> InternalBlobPart.BlobWrapper(blob.slice(startIndex, endIndex, ""))
-      is InternalBlobPart.BufferWrapper -> InternalBlobPart.BufferWrapper(buffer.slice(startIndex..<endIndex).toByteArray())
+      is InternalBlobPart.BufferWrapper -> InternalBlobPart.BufferWrapper(buffer.copyOfRange(startIndex, endIndex))
       is InternalBlobPart.FileWrapper -> InternalBlobPart.FileWrapper(uri, this.offset + startIndex, endIndex - startIndex, contentResolver)
     }
   }

@@ -12,7 +12,7 @@ enum BlobPart {
   func size() -> Int {
     switch self {
     case .string(let str):
-      return str.lengthOfBytes(using: .utf8)
+      return str.utf8.count
     case .data(let data):
       return data.count
     case .blob(let blob):

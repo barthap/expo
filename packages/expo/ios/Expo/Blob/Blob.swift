@@ -90,9 +90,11 @@ internal final class Blob: SharedObject, @unchecked Sendable {
       } else {
         switch part {
         case .string(let str):
-          let utf8 = Array(str.utf8)
-          let subUtf8 = Array(utf8[partStart..<partEnd])
-          dataSlice.append(.data(Data(subUtf8)))
+          // Index into the UTF-8 view instead of copying the whole string: `stream()` slices a Blob once per chunk.
+          let utf8 = str.utf8
+          let startIndex = utf8.index(utf8.startIndex, offsetBy: partStart)
+          let endIndex = utf8.index(startIndex, offsetBy: length)
+          dataSlice.append(.data(Data(utf8[startIndex..<endIndex])))
         case .data(let data):
           let subData = data.subdata(in: partStart..<partEnd)
           dataSlice.append(.data(subData))

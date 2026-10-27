@@ -135,3 +135,86 @@ describe('file range as a Blob constructor part', () => {
     expect(() => new Blob([blobLike as any])).toThrow(/Blob-like objects cannot be passed/);
   });
 });
+
+describe('Blob.stream() of a file range', () => {
+  const uri = 'file:///mock/document/large.bin';
+  const CHUNK = 64 * 1024;
+  let reads = 0;
+
+  beforeEach(() => {
+    reads = 0;
+    (globalThis as any)[MOCK_FILE_READER] = (fileUri: string) => {
+      reads++;
+      return readFile(fileUri);
+    };
+    files.set(
+      uri,
+      new Uint8Array(3 * CHUNK + 100).map((_, i) => i % 251)
+    );
+  });
+
+  afterEach(() => {
+    delete (globalThis as any)[MOCK_FILE_READER];
+    files.clear();
+  });
+
+  async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> {
+    const chunks: Uint8Array[] = [];
+    const reader = stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return chunks;
+      chunks.push(value);
+    }
+  }
+
+  it('reads the file one chunk per pull instead of all at once', async () => {
+    // Streaming a slice of a large file must not load the whole slice into memory first.
+    // Each chunk reads the file once, and no chunk is larger than 64 KiB.
+    const blob = new Blob([createFileLike({ uri, offset: 0, size: 3 * CHUNK + 100 }) as any]);
+
+    const chunks = await readAll(blob.stream());
+
+    expect(chunks.map((chunk) => chunk.length)).toEqual([CHUNK, CHUNK, CHUNK, 100]);
+    expect(reads).toBe(4);
+    expect(Buffer.concat(chunks).equals(Buffer.from(files.get(uri)!))).toBe(true);
+  });
+
+  it('ends early when the file got shorter', async () => {
+    // Without the early end, the stream would keep pulling empty chunks forever
+    const blob = new Blob([createFileLike({ uri, offset: 0, size: 3 * CHUNK + 100 }) as any]);
+    files.set(uri, files.get(uri)!.slice(0, CHUNK + 10));
+
+    const chunks = await readAll(blob.stream());
+
+    expect(chunks.map((chunk) => chunk.length)).toEqual([CHUNK, 10]);
+  });
+
+  it('errors when the file was deleted', async () => {
+    const blob = new Blob([createFileLike({ uri, offset: 0, size: 10 }) as any]);
+    files.delete(uri);
+
+    await expect(readAll(blob.stream())).rejects.toThrow(
+      /Unable to read the file-backed Blob part/
+    );
+  });
+
+  it('fills BYOB reads up to the size of the view', async () => {
+    const blob = new Blob([createFileLike({ uri, offset: 5, size: 20 }) as any]);
+    const reader = blob.stream().getReader({ mode: 'byob' });
+
+    const first = await reader.read(new Uint8Array(16));
+    const second = await reader.read(new Uint8Array(16));
+    const last = await reader.read(new Uint8Array(16));
+
+    expect(Array.from(first.value!)).toEqual(Array.from(files.get(uri)!.slice(5, 21)));
+    expect(Array.from(second.value!)).toEqual(Array.from(files.get(uri)!.slice(21, 25)));
+    expect(last.done).toBe(true);
+  });
+
+  it('keeps a reference to the source Blob', () => {
+    const blob = new Blob(['abc']);
+
+    expect((blob.stream() as any)[Symbol.for('expo.blob.streamSource')]).toBe(blob);
+  });
+});

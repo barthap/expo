@@ -59,6 +59,9 @@ const copyReactNativeBlob = (blobPart: any): NativeBlob => {
  */
 const FILE_RANGE: unique symbol = Symbol.for('expo.blob.fileRange');
 
+// The Blob that a stream returned by `Blob.stream()` reads from
+const STREAM_SOURCE: unique symbol = Symbol.for('expo.blob.streamSource');
+
 type FileRangeSource = { [FILE_RANGE]: () => FileRangeReference };
 
 // The largest size of a file-backed part: Blob sizes are signed 32-bit integers on Android
@@ -177,51 +180,48 @@ export class Blob extends NativeBlobModule.Blob {
   }
 
   stream(): ReadableStream {
-    let getBlobBytes: (() => Promise<Uint8Array>) | null = this.bytes.bind(this);
+    // Reads one chunk at a time through `slice()`, so streaming a file-backed Blob reads only a
+    // chunk-sized range of the file per pull instead of the whole Blob up front.
+    const readChunk = (start: number, end: number) => this.slice(start, end).bytes();
+    const size = this.size;
     let offset = 0;
-    let cachedBytes: Uint8Array | null = null;
 
-    return new ReadableStream({
+    const stream = new ReadableStream({
       type: 'bytes',
       async pull(controller: ReadableByteStreamController) {
-        if (!cachedBytes) {
-          if (!getBlobBytes) {
-            throw new Error('Cannot read from a closed stream');
-          }
-          cachedBytes = await getBlobBytes();
-          getBlobBytes = null;
-        }
-
-        if (offset >= cachedBytes.length) {
+        const view = controller.byobRequest?.view;
+        if (offset >= size) {
           controller.close();
-          cachedBytes = null;
+          controller.byobRequest?.respond(0);
           return;
         }
-
-        if (controller.byobRequest?.view) {
-          const view: Uint8Array = new Uint8Array(
-            controller.byobRequest.view.buffer,
-            controller.byobRequest.view.byteOffset,
-            controller.byobRequest.view.byteLength
-          );
-          const end = Math.min(offset + view.byteLength, cachedBytes.length);
-          const chunk = cachedBytes.subarray(offset, end);
-          view.set(chunk, 0);
-          controller.byobRequest.respond(chunk.length);
-          offset = end;
-          if (offset >= cachedBytes.length) {
-            controller.close();
-            cachedBytes = null;
-          }
+        const chunkSize = view ? view.byteLength : DEFAULT_CHUNK_SIZE;
+        const end = Math.min(offset + chunkSize, size);
+        const chunk = await readChunk(offset, end);
+        // A file-backed part returns fewer bytes when the file got shorter since the Blob was
+        // created. Nothing more can be read then, so the stream ends early.
+        if (chunk.length === 0) {
+          offset = size;
+          controller.close();
+          controller.byobRequest?.respond(0);
           return;
         }
+        offset = chunk.length < end - offset ? size : offset + chunk.length;
 
-        const chunkSize = DEFAULT_CHUNK_SIZE;
-        const end = Math.min(offset + chunkSize, cachedBytes.length);
-        controller.enqueue(cachedBytes.subarray(offset, end) as ArrayBufferView<ArrayBuffer>);
-        offset = end;
+        if (view) {
+          new Uint8Array(view.buffer, view.byteOffset, view.byteLength).set(chunk, 0);
+          controller.byobRequest!.respond(chunk.length);
+        } else {
+          controller.enqueue(chunk);
+        }
+        if (offset >= size) {
+          controller.close();
+        }
       },
     });
+    // Lets a consumer of the stream, such as a native file sink, read the Blob directly
+    Object.defineProperty(stream, STREAM_SOURCE, { value: this });
+    return stream;
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
