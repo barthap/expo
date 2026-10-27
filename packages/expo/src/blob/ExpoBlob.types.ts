@@ -54,12 +54,24 @@ export declare class NativeBlob extends SharedObject {
   readonly size: number;
   readonly type: string;
 
-  constructor(blobParts?: BlobPart[], options?: BlobPropertyBag);
+  constructor(blobParts?: (BlobPart | NativeBlob)[], options?: BlobPropertyBag);
 
   slice(start?: number, end?: number, contentType?: string): Blob;
   bytes(): Promise<Uint8Array>;
   text(): Promise<string>;
 }
+
+/**
+ * Points at bytes in React Native's native blob store. Mirrors the `data` property of
+ * React Native's built-in `Blob`.
+ * @hidden
+ * @private
+ */
+export type ReactNativeBlobReference = {
+  blobId: string;
+  offset: number;
+  size: number;
+};
 
 /**
  * @hidden
@@ -75,6 +87,10 @@ export declare class ExpoBlobModule extends NativeModule {
    * Removes bytes registered with `store` from React Native's native blob store.
    */
   release(blobId: string): void;
+  /**
+   * Creates a Blob with a copy of the referenced bytes from React Native's native blob store.
+   */
+  fromReactNativeBlob(reference: ReactNativeBlobReference): NativeBlob;
 }
 
 /**

@@ -71,5 +71,23 @@ function release(blobId: string): void {
   reactNativeBlobStore.delete(blobId);
 }
 
-export { Blob, store, release, reactNativeBlobStore };
-export default { Blob, store, release, reactNativeBlobStore };
+function fromReactNativeBlob(reference: { blobId: string; offset: number; size: number }): Blob {
+  const stored = reactNativeBlobStore.get(reference.blobId);
+  if (!stored) {
+    throw new Error(
+      `Blob with id '${reference.blobId}' could not be resolved from the React Native blob store`
+    );
+  }
+  const { offset, size } = reference;
+  // Like the native implementation: `slice` would clamp a bad range instead of failing
+  if (offset < 0 || size < 0 || offset + size > stored.length) {
+    throw new Error(
+      `The range of the React Native Blob with id '${reference.blobId}' lies outside of its bytes in the React Native blob store`
+    );
+  }
+  // A copy, like the native implementation: the Blob must not depend on the store entry
+  return new Blob([stored.slice(offset, offset + size)]);
+}
+
+export { Blob, store, release, fromReactNativeBlob, reactNativeBlobStore };
+export default { Blob, store, release, fromReactNativeBlob, reactNativeBlobStore };

@@ -1636,5 +1636,142 @@ export async function test(
         expect(xhrError).not.toBeNull();
       });
     });
+
+    describe('React Native Blob as a constructor part', () => {
+      // React Native's XHR returns its own Blob, whose bytes live in React Native's blob store.
+      // The constructor copies them out, so the new Blob must not depend on that Blob afterwards.
+      // The source bytes come from a `blob:` URL of an Expo Blob, which keeps the tests offline.
+      const fetchReactNativeBlob = (url: string): Promise<any> =>
+        new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.responseType = 'blob';
+          xhr.onload = () => resolve(xhr.response);
+          xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
+          xhr.open('GET', url);
+          xhr.send();
+        });
+
+      const SOURCE_BYTES = [104, 101, 108, 108, 111, 0, 255, 128];
+
+      // Calls `test` with a React Native Blob holding SOURCE_BYTES and cleans up both stores after.
+      const withReactNativeBlob = async (test: (rnBlob: any) => Promise<void>) => {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(SOURCE_BYTES)]));
+        let rnBlob: any = null;
+        try {
+          rnBlob = await fetchReactNativeBlob(url);
+          await test(rnBlob);
+        } finally {
+          URL.revokeObjectURL(url);
+          // Releases the XHR's own store entry; a second close() would throw
+          if (rnBlob?._data) {
+            rnBlob.close();
+          }
+        }
+      };
+
+      it('copies the bytes of a React Native Blob', async () => {
+        await withReactNativeBlob(async (rnBlob) => {
+          // Guard: the part must really be React Native's Blob, not an Expo Blob
+          expect(typeof rnBlob.data.blobId).toBe('string');
+          expect(typeof rnBlob.arrayBuffer).not.toBe('function');
+
+          const blob = new Blob([rnBlob]);
+
+          expect(blob.size).toBe(SOURCE_BYTES.length);
+          expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
+        });
+      });
+
+      it('mixes a React Native Blob slice with other parts', async () => {
+        await withReactNativeBlob(async (rnBlob) => {
+          // A slice shares the blobId and differs in offset and size
+          const blob = new Blob(['x', rnBlob.slice(1, 3), new Uint8Array([1])]);
+
+          expect(Array.from(await blob.bytes())).toEqual([120, 101, 108, 1]);
+        });
+      });
+
+      it('keeps its bytes after the React Native Blob is closed', async () => {
+        await withReactNativeBlob(async (rnBlob) => {
+          const blob = new Blob([rnBlob]);
+
+          rnBlob.close();
+
+          expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
+          expect(Array.from(await blob.slice(5).bytes())).toEqual([0, 255, 128]);
+        });
+      });
+
+      it('throws a TypeError for a closed React Native Blob', async () => {
+        await withReactNativeBlob(async (rnBlob) => {
+          rnBlob.close();
+
+          let error: any = null;
+          try {
+            new Blob([rnBlob]);
+          } catch (e) {
+            error = e;
+          }
+          expect(error instanceof TypeError).toBe(true);
+          expect(error.message).toMatch(/closed React Native Blob/);
+        });
+      });
+
+      // Same shape as React Native's Blob (`react-native/Libraries/Blob/Blob.js`), but pointing at
+      // any handle. The native side must report a bad handle as an error instead of crashing
+      // (iOS `subdataWithRange:`) or padding with zeros (Android `copyOfRange`).
+      const createReactNativeBlobHandle = (data: {
+        blobId: string;
+        offset: number;
+        size: number;
+      }) => ({
+        _data: data as typeof data | null,
+        get data() {
+          if (!this._data) {
+            throw new Error('Blob has been closed and is no longer available');
+          }
+          return this._data;
+        },
+        get size(): number {
+          return this.data.size;
+        },
+        slice() {},
+        close() {
+          this._data = null;
+        },
+      });
+
+      const constructionError = (part: any): any => {
+        try {
+          new Blob([part]);
+        } catch (e) {
+          return e;
+        }
+        return null;
+      };
+
+      it('throws for a React Native Blob missing from the store', () => {
+        const handle = createReactNativeBlobHandle({ blobId: 'no-such-blob', offset: 0, size: 1 });
+
+        const error = constructionError(handle);
+
+        expect(error instanceof Error).toBe(true);
+        expect(error.message).toMatch(/no-such-blob.*React Native blob store/);
+      });
+
+      it('throws for a React Native Blob range past the end of its bytes', () => {
+        const blobId = storeBlobInReactNativeBlobStore(new Blob([new Uint8Array([1, 2, 3, 4])]));
+        try {
+          const handle = createReactNativeBlobHandle({ blobId, offset: 2, size: 10 });
+
+          const error = constructionError(handle);
+
+          expect(error instanceof Error).toBe(true);
+          expect(error.message).toMatch(/range of the React Native Blob.*outside of its bytes/);
+        } finally {
+          releaseBlobFromReactNativeBlobStore(blobId);
+        }
+      });
+    });
   });
 }

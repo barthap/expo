@@ -134,7 +134,7 @@ export function isBlobLike(value: any): boolean {
  * closed blob still counts as a Blob: releasing the bytes does not change what class the
  * object belongs to, and the web platform has no `close()` at all.
  */
-function isReactNativeBlob(value: any): boolean {
+export function isReactNativeBlob(value: any): boolean {
   if (value == null || typeof value !== 'object' || typeof value.slice !== 'function') {
     return false;
   }

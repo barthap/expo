@@ -20,6 +20,19 @@ class BlobModule : Module() {
         ?: throw RNBlobModuleUnavailableException()
     }
 
+  // Returns a copy of the referenced bytes, so they stay valid after the entry is removed from the store.
+  private fun resolveRNBlob(reference: RNBlobReference): ByteArray {
+    // The whole entry is read and the range cut here: React Native's `resolve` pads a range past the end with zeros.
+    val data = reactBlobModule.resolve(reference.blobId, 0, -1)
+      ?: throw RNBlobResolveException(reference.blobId)
+    val start = reference.offset
+    val end = start + reference.size
+    if (start < 0 || reference.size < 0 || end > data.size) {
+      throw RNBlobRangeException(reference.blobId)
+    }
+    return data.copyOfRange(start, end)
+  }
+
   override fun definition() = ModuleDefinition {
     Name("ExpoBlob")
 
@@ -31,6 +44,13 @@ class BlobModule : Module() {
     // Removing an unknown id is a no-op in React Native's BlobModule.
     Function("release") { blobId: String ->
       reactBlobModule.remove(blobId)
+    }
+
+    // A Blob with a copy of the bytes of a React Native Blob, which the JS constructor passes on as a Blob part.
+    // A separate function, because a record cannot be a constructor part: the part type also accepts
+    // typed arrays, and on Android both converters claim every JS object.
+    Function("fromReactNativeBlob") { reference: RNBlobReference ->
+      Blob(listOf(InternalBlobPart.BufferWrapper(resolveRNBlob(reference))))
     }
 
     Class(Blob::class) {

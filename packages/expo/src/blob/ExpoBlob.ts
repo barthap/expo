@@ -1,15 +1,55 @@
 import { requireNativeModule } from 'expo-modules-core';
 
-import type { BlobPart, ExpoBlobModule } from './ExpoBlob.types';
+import type {
+  BlobPart,
+  ExpoBlobModule,
+  NativeBlob,
+  ReactNativeBlobReference,
+} from './ExpoBlob.types';
 import {
   DEFAULT_CHUNK_SIZE,
   isBlobLike,
+  isReactNativeBlob,
   isTypedArray,
   normalizedContentType,
   preprocessOptions,
 } from './utils';
 
 const NativeBlobModule = requireNativeModule<ExpoBlobModule>('ExpoBlob');
+
+/**
+ * Copies the bytes of a React Native built-in `Blob` out of React Native's native blob store
+ * into a native Blob, which the constructor then takes as an ordinary Blob part. The copy is
+ * made right away, so the new Blob does not depend on the React Native Blob afterwards:
+ * `close()` or garbage collection of it cannot change our bytes.
+ */
+const copyReactNativeBlob = (blobPart: any): NativeBlob => {
+  let data: any;
+  try {
+    data = blobPart.data;
+  } catch {
+    // React Native's `data` getter throws once `close()` released the bytes
+    throw new TypeError(
+      'A closed React Native Blob cannot be passed to the Blob constructor, because close() ' +
+        'released its bytes. Create the Blob before closing the React Native Blob.'
+    );
+  }
+  // React Native always sets all three fields. A missing one must not reach native code,
+  // where it would default to 0 and silently copy the wrong bytes.
+  if (typeof data.offset !== 'number' || typeof data.size !== 'number') {
+    throw new TypeError(
+      `The React Native Blob with id '${data.blobId}' has a malformed handle: ` +
+        'its offset and size must be numbers.'
+    );
+  }
+  const reference: ReactNativeBlobReference = {
+    blobId: data.blobId,
+    // Slices of a React Native Blob share its blobId and point at a range of its bytes
+    offset: data.offset,
+    size: data.size,
+  };
+  return NativeBlobModule.fromReactNativeBlob(reference);
+};
 
 const inputMapping = (blobPart: BlobPart) => {
   if (blobPart instanceof ArrayBuffer) {
@@ -23,6 +63,10 @@ const inputMapping = (blobPart: BlobPart) => {
   // passed to the native constructor.
   if (Object.prototype.isPrototypeOf.call(NativeBlobModule.Blob.prototype, blobPart)) {
     return blobPart;
+  }
+  // Checked before the generic Blob-like case below, which React Native Blobs also match
+  if (isReactNativeBlob(blobPart)) {
+    return copyReactNativeBlob(blobPart);
   }
   if (isBlobLike(blobPart)) {
     throw new TypeError(
@@ -55,7 +99,7 @@ export class Blob extends NativeBlobModule.Blob {
       throw new TypeError("Blob constructor requires 'new' operator");
     }
 
-    const processedBlobParts: BlobPart[] = [];
+    const processedBlobParts: (BlobPart | NativeBlob)[] = [];
 
     if (blobParts === undefined) {
       super([], preprocessOptions(options));

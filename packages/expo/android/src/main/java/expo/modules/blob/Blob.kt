@@ -89,6 +89,21 @@ private fun validType(type: String): Boolean {
 
 internal typealias BlobPart = EitherOfThree<String, Blob, TypedArray>
 
+/**
+ * Points at bytes in React Native's blob store. Mirrors the `data` property of React Native's JS `Blob`.
+ */
+@OptimizedRecord
+internal class RNBlobReference : Record {
+  @Field
+  val blobId: String = ""
+
+  @Field
+  val offset: Int = 0
+
+  @Field
+  val size: Int = 0
+}
+
 private fun TypedArray.bytes(): ByteArray {
   val byteArray = ByteArray(this.byteLength)
 
