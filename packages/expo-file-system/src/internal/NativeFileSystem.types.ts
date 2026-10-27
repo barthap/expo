@@ -219,6 +219,10 @@ export declare class NativeFileSystemFile {
   /**
    * Deletes a file.
    *
+   * > **Note:** On web, `delete()` releases the data of a file from `File.fromWebFile()` and
+   * > revokes its `blob:` URL. After that, `exists` is `false`, but the same instance can still read
+   * > the data it already holds.
+   *
    * @throws Error if the directory does not exist or cannot be deleted.
    */
   delete(): void;

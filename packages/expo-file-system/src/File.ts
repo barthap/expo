@@ -213,6 +213,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * from this module. The returned file reads from the same data and keeps its `name`, `type`, and
    * `lastModified`. Its `uri` is a `blob:` URL, so `new File(file.uri)` returns a file with the same
    * data until you call `delete()`.
+   *
+   * > **Note:** The wrapped data stays in memory until you call `delete()`, because the module keeps a
+   * > reference to it under the `blob:` URL.
    * @param webFile The browser `File` to wrap.
    * @platform web
    */

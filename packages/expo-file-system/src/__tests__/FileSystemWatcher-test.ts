@@ -239,23 +239,19 @@ describeNative('File.watch and Directory.watch', () => {
 });
 
 describeWebLike('FileSystemWatcher web fallback', () => {
-  it('warns and returns a no-op subscription', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  it('throws UnavailabilityError, because web files are not stored on disk and never change', () => {
     const {
       FileSystemWatcher: WebFileSystemWatcher,
     } = require('../internal/FileSystemWatcher.web');
 
-    const subscription = new WebFileSystemWatcher(
-      'file:///mock/cache/web.txt',
-      () => {},
-      {},
-      (uri: string) => new File(uri)
-    );
-
-    expect(warn).toHaveBeenCalledWith('FileSystemWatcher is not supported on web');
-    expect(typeof subscription.remove).toBe('function');
-    subscription.remove();
-
-    warn.mockRestore();
+    expect(
+      () =>
+        new WebFileSystemWatcher(
+          'file:///mock/cache/web.txt',
+          () => {},
+          {},
+          (uri: string) => new File(uri)
+        )
+    ).toThrow(expect.objectContaining({ code: 'ERR_UNAVAILABLE' }));
   });
 });

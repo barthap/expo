@@ -1,3 +1,5 @@
+import { UnavailabilityError } from 'expo-modules-core';
+
 import type { Directory } from '../Directory';
 import type { File } from '../File';
 import type { WatchEvent, WatchOptions, WatchSubscription } from '../FileSystemWatcher.types';
@@ -11,7 +13,10 @@ export class FileSystemWatcher<T extends File | Directory> implements WatchSubsc
     _options: WatchOptions = {},
     _targetFactory: TargetFactory<T>
   ) {
-    console.warn('FileSystemWatcher is not supported on web');
+    const error = new UnavailabilityError('expo-file-system', 'watch');
+    error.message =
+      'watch is not available on web. Files on web are not stored on disk, so they cannot change.';
+    throw error;
   }
 
   remove(): void {}
