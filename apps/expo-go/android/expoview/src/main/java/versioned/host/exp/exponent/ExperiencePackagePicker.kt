@@ -83,6 +83,7 @@ import expo.modules.video.VideoModule
 import expo.modules.videothumbnails.VideoThumbnailsModule
 import expo.modules.webbrowser.WebBrowserModule
 import expo.modules.webview.DomWebViewModule
+import expo.modules.winter.Uint8ArrayBase64Module
 import host.exp.exponent.experience.splashscreen.legacy.SplashScreenModule
 import host.exp.exponent.experience.splashscreen.legacy.SplashScreenPackage
 
@@ -137,6 +138,7 @@ object ExperiencePackagePicker : ModulesProvider {
     BackgroundFetchModule::class.java to null,
     BackgroundTaskModule::class.java to null,
     BlobModule::class.java to null,
+    Uint8ArrayBase64Module::class.java to null,
     BlurModule::class.java to null,
     CalendarModule::class.java to null,
     CameraViewModule::class.java to null,
