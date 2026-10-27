@@ -118,9 +118,14 @@ internal final class Blob: SharedObject, @unchecked Sendable {
   }
 
   func bytes() async -> [UInt8] {
+    return bytesSync()
+  }
+
+  /// All part kinds hold their bytes in memory, so the Blob can also be read synchronously.
+  func bytesSync() -> [UInt8] {
     var result: [UInt8] = []
     for part in blobParts {
-      result.append(contentsOf: await part.bytes())
+      result.append(contentsOf: part.bytesSync())
     }
     return result
   }

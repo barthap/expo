@@ -4,6 +4,7 @@
 
 import { Blob, type BlobPart } from 'expo-blob';
 import { Platform } from 'expo-modules-core';
+import { releaseBlobFromReactNativeBlobStore, storeBlobInReactNativeBlobStore } from 'expo/blob';
 
 import type { JasmineInterface } from '../types';
 
@@ -1434,6 +1435,98 @@ export async function test({ describe, it, expect }: JasmineInterface) {
         const stream = blob.stream();
         const chunks = await read_all_chunks(stream, { mode: 'byob' });
         expect(chunks).toEqual(input_arr);
+      });
+    });
+
+    describe('React Native blob store', () => {
+      // React Native's own Blob only holds a `{ blobId, offset, size }` handle; consumers such as
+      // FileReader resolve the bytes from the native blob store by id. These tests check that bytes
+      // registered from an expo Blob are what React Native reads back, and that releasing removes them.
+      const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;
+
+      const createReactNativeBlob = (blobId: string, blob: Blob) =>
+        BlobManager.createFromOptions({
+          blobId,
+          offset: 0,
+          size: blob.size,
+          type: blob.type,
+          lastModified: Date.now(),
+        });
+
+      const readWithFileReader = (
+        reactNativeBlob: unknown,
+        method: 'readAsArrayBuffer' | 'readAsText'
+      ): Promise<any> =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener('load', () => resolve(reader.result));
+          reader.addEventListener('error', () => reject(reader.error));
+          reader[method](reactNativeBlob as any);
+        });
+
+      it('React Native reads back the stored bytes', async () => {
+        const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13]), new Blob(['cd'])], {
+          type: 'application/octet-stream',
+        });
+        const blobId = storeBlobInReactNativeBlobStore(blob);
+        try {
+          const buffer = await readWithFileReader(
+            createReactNativeBlob(blobId, blob),
+            'readAsArrayBuffer'
+          );
+          expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
+        } finally {
+          releaseBlobFromReactNativeBlobStore(blobId);
+        }
+      });
+
+      it('React Native reads back the stored text', async () => {
+        const blob = new Blob(['hello, ', 'świecie 🌍'], { type: 'text/plain' });
+        const blobId = storeBlobInReactNativeBlobStore(blob);
+        try {
+          const text = await readWithFileReader(createReactNativeBlob(blobId, blob), 'readAsText');
+          expect(text).toEqual('hello, świecie 🌍');
+        } finally {
+          releaseBlobFromReactNativeBlobStore(blobId);
+        }
+      });
+
+      it('stored bytes outlive the source Blob', async () => {
+        let blob: Blob | null = new Blob(['still here']);
+        const size = blob.size;
+        const blobId = storeBlobInReactNativeBlobStore(blob);
+        blob = null;
+        gc?.();
+        try {
+          const text = await readWithFileReader(
+            BlobManager.createFromOptions({ blobId, offset: 0, size }),
+            'readAsText'
+          );
+          expect(text).toEqual('still here');
+        } finally {
+          releaseBlobFromReactNativeBlobStore(blobId);
+        }
+      });
+
+      it('released bytes can no longer be read', async () => {
+        const blob = new Blob(['gone']);
+        const blobId = storeBlobInReactNativeBlobStore(blob);
+        releaseBlobFromReactNativeBlobStore(blobId);
+
+        let error: any = null;
+        try {
+          await readWithFileReader(createReactNativeBlob(blobId, blob), 'readAsText');
+        } catch (e) {
+          error = e;
+        }
+        // React Native's FileReader rejects natively when the id is missing from the store and
+        // reports it as a NotReadableError.
+        expect(error).not.toBeNull();
+        expect(error.name).toEqual('NotReadableError');
+      });
+
+      it('releasing an unknown id does not throw', () => {
+        expect(() => releaseBlobFromReactNativeBlobStore('unknown-blob-id')).not.toThrow();
       });
     });
   });

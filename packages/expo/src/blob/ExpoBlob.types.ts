@@ -67,6 +67,14 @@ export declare class NativeBlob extends SharedObject {
  */
 export declare class ExpoBlobModule extends NativeModule {
   Blob: typeof NativeBlob;
+  /**
+   * Copies the Blob's bytes into React Native's native blob store and returns the assigned blob id.
+   */
+  store(blob: NativeBlob): string;
+  /**
+   * Removes bytes registered with `store` from React Native's native blob store.
+   */
+  release(blobId: string): void;
 }
 
 /**

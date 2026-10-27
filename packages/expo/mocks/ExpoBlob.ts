@@ -55,5 +55,21 @@ class Blob {
   }
 }
 
-export { Blob };
-export default { Blob };
+// In-memory stand-in for React Native's native blob store (RCTBlobManager / BlobModule)
+const reactNativeBlobStore = new Map<string, Uint8Array>();
+let nextBlobId = 0;
+
+function store(blob: Blob): string {
+  const blobId = `mock-blob-${nextBlobId++}`;
+  // A copy, like the native implementation: the store must not alias the blob's bytes.
+  reactNativeBlobStore.set(blobId, blob['_bytes'].slice());
+  return blobId;
+}
+
+function release(blobId: string): void {
+  // Like React Native's `remove`, an unknown id is a no-op.
+  reactNativeBlobStore.delete(blobId);
+}
+
+export { Blob, store, release, reactNativeBlobStore };
+export default { Blob, store, release, reactNativeBlobStore };
