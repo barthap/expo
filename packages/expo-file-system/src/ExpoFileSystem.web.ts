@@ -1,5 +1,7 @@
-import { UnavailabilityError } from 'expo-modules-core';
+import { CodedError, UnavailabilityError } from 'expo-modules-core';
 
+import type { PickFileOptions } from './File.types';
+import type { DownloadOptions } from './NetworkTasks.types';
 import { PathUtilities } from './pathUtilities';
 
 // Web has no file system to write to. Files are either snapshot-backed (they hold the data of
@@ -71,19 +73,23 @@ function dataUriType(uri: string): string {
   return type.startsWith(';') ? '' : type;
 }
 
-async function fetchUri(uri: string, signal?: AbortSignal): Promise<Response> {
+async function fetchUri(
+  uri: string,
+  init?: RequestInit,
+  failure = `Failed to read the file at "${uri}"`
+): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(uri, { signal });
+    response = await fetch(uri, init);
   } catch (error) {
-    throw new Error(`Failed to read the file at "${uri}": ${(error as Error)?.message ?? error}`, {
+    throw new Error(`${failure}: ${(error as Error)?.message ?? error}`, {
       cause: error,
     });
   }
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(
-      `Failed to read the file at "${uri}": the server responded with status ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+      `${failure}: the server responded with status ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
       { cause: response }
     );
   }
@@ -145,7 +151,7 @@ class FileSystemFile extends globalThis.File {
   }
 
   async #fetch(signal?: AbortSignal): Promise<Response> {
-    const response = await fetchUri(this.#uri, signal);
+    const response = await fetchUri(this.#uri, { signal });
     if (!hasScheme(this.#uri, 'data')) {
       this.#fetchedType = normalizeType(response.headers.get('content-type'));
     }
@@ -399,19 +405,177 @@ class FileSystemDownloadTask {
   }
 }
 
+// How long to wait after the window gets focus back before a picker without a `change` counts as
+// canceled. Only browsers without the `cancel` event on file inputs use it.
+const PICKER_FOCUS_GRACE_MS = 1000;
+
+// Whether a file dialog is open. Browsers show one dialog at a time.
+let pickerInProgress = false;
+
+// Returns the `accept` attribute for `mimeTypes`, or `null` when every type is allowed.
+function acceptFor(mimeTypes: string | string[] | undefined): string | null {
+  const types = (Array.isArray(mimeTypes) ? mimeTypes : [mimeTypes]).filter(
+    (type): type is string => !!type
+  );
+  if (types.length === 0 || types.includes('*/*')) {
+    return null;
+  }
+  return types.join(',');
+}
+
+// Opens the browser file dialog through a hidden `<input type="file">`. `initialUri` is ignored,
+// because browsers do not let a page choose the folder the dialog opens in. A canceled dialog
+// rejects, and the shared `File.pickFileAsync` turns that into `{ canceled: true }`.
+function pickFileAsync(options: PickFileOptions = {}): Promise<FileSystemFile | FileSystemFile[]> {
+  // Browsers ignore `click()` on a file input without a user gesture, and the promise would never
+  // settle. Browsers without `navigator.userActivation` rely on the cancel handling below.
+  if (navigator.userActivation?.isActive === false) {
+    return Promise.reject(
+      new CodedError(
+        'ERR_USER_ACTIVATION',
+        'File.pickFileAsync must be called from a user gesture, such as a click or key press handler, because browsers only open the file dialog in response to user input.'
+      )
+    );
+  }
+  // Like `PickingInProgressException` on iOS, the shared `File.pickFileAsync` turns this into
+  // `{ canceled: true }`.
+  if (pickerInProgress) {
+    return Promise.reject(
+      new CodedError('ERR_PICKER_IN_PROGRESS', 'Another file picker is already open.')
+    );
+  }
+  pickerInProgress = true;
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    const accept = acceptFor(options.mimeTypes);
+    if (accept) {
+      input.accept = accept;
+    }
+    input.multiple = !!options.multipleFiles;
+
+    let focusTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      input.removeEventListener('change', onChange);
+      input.removeEventListener('cancel', onCancel);
+      window.removeEventListener('focus', onFocus);
+      clearTimeout(focusTimer);
+      input.remove();
+      pickerInProgress = false;
+    };
+    const onChange = () => {
+      cleanup();
+      const webFiles = Array.from(input.files ?? []);
+      if (webFiles.length === 0) {
+        reject(new CodedError('ERR_PICKER_CANCELED', 'The file picker was canceled.'));
+        return;
+      }
+      let files: FileSystemFile[];
+      try {
+        files = webFiles.map((webFile) => FileSystemFile.fromWebFile(webFile));
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      resolve(options.multipleFiles ? files : files[0]!);
+    };
+    const onCancel = () => {
+      cleanup();
+      reject(new CodedError('ERR_PICKER_CANCELED', 'The file picker was canceled.'));
+    };
+    // The window gets focus back when the dialog closes. Without a `change` shortly after, the
+    // dialog was canceled. `onChange` also handles a `change` that never fired but left files.
+    const onFocus = () => {
+      clearTimeout(focusTimer);
+      focusTimer = setTimeout(onChange, PICKER_FOCUS_GRACE_MS);
+    };
+
+    input.addEventListener('change', onChange);
+    input.addEventListener('cancel', onCancel);
+    // Browsers that fire `cancel` on file inputs never need the focus fallback, which could
+    // report a slow `change` (for example a large file) as a cancel.
+    if (!('oncancel' in input)) {
+      window.addEventListener('focus', onFocus);
+    }
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+// Returns the file name from a `Content-Disposition` header, or `null` when it has none. Prefers
+// the encoded `filename*=UTF-8''...` form over `filename=`, as RFC 6266 asks.
+function contentDispositionName(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+  // The `filename*=` charset is ignored (only UTF-8 is decoded), and decoding errors fall through.
+  const encoded = /filename\*\s*=\s*([\w-]+)'[^']*'([^;\s]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return withoutPath(decodeURIComponent(encoded[2]!));
+    } catch {
+      // A malformed percent-encoding falls through to `filename=`.
+    }
+  }
+  const plain = /(?:^|;)\s*filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]*))/i.exec(header);
+  if (plain) {
+    return withoutPath(plain[1] !== undefined ? plain[1].replace(/\\(.)/g, '$1') : plain[2]!);
+  }
+  return null;
+}
+
+// Keeps only the last part of a name that contains a path, and returns `null` for an empty name.
+function withoutPath(name: string): string | null {
+  return name.trim().split(/[\\/]/).pop()!.trim() || null;
+}
+
+// Returns the last non-empty path segment of an `http(s):` URL. Other URLs have no file name in
+// their path: `data:text/plain,hi` has the data and `blob:` URLs have a random id.
+function urlName(url: string): string | null {
+  if (!hasScheme(url, 'http') && !hasScheme(url, 'https')) {
+    return null;
+  }
+  try {
+    const segment = new URL(url).pathname.split('/').filter(Boolean).pop();
+    return segment ? withoutPath(decodeURIComponent(segment)) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Downloads `url` into memory and returns the `blob:` uri of a snapshot-backed file. The location
+// of `destination` is ignored, because there is nowhere to store the file yet: `Paths.cache` and
+// `Paths.document` are placeholders until OPFS support. A `File` destination only gives the name.
+// `idempotent` is ignored, because downloads never overwrite anything. The shared
+// `File.downloadFileAsync` sends one progress event from the downloaded size, and `signal` goes
+// straight to `fetch`, so `addListener` and `cancelDownloadAsync` have nothing to do.
+async function downloadFileAsync(
+  url: string,
+  destination: FileSystemFile | FileSystemDirectory,
+  options?: DownloadOptions
+): Promise<string> {
+  const response = await fetchUri(
+    url,
+    { headers: options?.headers, signal: options?.signal },
+    `Failed to download "${url}"`
+  );
+  const blob = await response.blob();
+  const name =
+    (destination instanceof FileSystemFile ? destination.name || null : null) ??
+    contentDispositionName(response.headers.get('content-disposition')) ??
+    // `response.url` is the URL after redirects, so its name matches the file that was served.
+    urlName(response.url || url) ??
+    'download';
+  return registerBlob(blob, name);
+}
+
 export default {
   FileSystemDirectory,
   FileSystemFile,
   FileSystemUploadTask,
   FileSystemDownloadTask,
-  downloadFileAsync: () => {
-    return Promise.reject(
-      unavailable(
-        'File.downloadFileAsync',
-        'Use `fetch()` and wrap the result with `File.fromWebFile()`.'
-      )
-    );
-  },
+  downloadFileAsync,
   cancelDownloadAsync: () => {},
   addListener: () => ({ remove() {} }),
   pickDirectoryAsync: () => {
@@ -419,11 +583,7 @@ export default {
       unavailable('Directory.pickDirectoryAsync', 'Browsers do not give access to directories.')
     );
   },
-  pickFileAsync: () => {
-    return Promise.reject(
-      unavailable('File.pickFileAsync', 'Use an `<input type="file">` and `File.fromWebFile()`.')
-    );
-  },
+  pickFileAsync,
   info: () => {
     throw unavailable('Paths.info', 'Paths on web do not point to stored files or directories.');
   },

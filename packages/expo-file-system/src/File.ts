@@ -198,7 +198,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
         canceled: false,
       };
     } catch (e) {
-      if (usingOldAPI) {
+      // On web, a picker opened outside a user gesture never opens. That is a bug in the calling
+      // code, not a cancel, so it is thrown. Native modules never use this code.
+      if (usingOldAPI || (e as { code?: unknown })?.code === 'ERR_USER_ACTIVATION') {
         throw e;
       }
       return {

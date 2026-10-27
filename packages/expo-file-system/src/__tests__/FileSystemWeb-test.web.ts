@@ -366,6 +366,195 @@ describe('File on web, uri-backed reads', () => {
   });
 });
 
+describe('File.downloadFileAsync on web', () => {
+  let fetchMock: jest.SpyInstance<ReturnType<typeof fetch>, Parameters<typeof fetch>>;
+  const downloaded: File[] = [];
+
+  beforeEach(() => {
+    fetchMock = jest.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchMock.mockRestore();
+    for (const file of downloaded.splice(0)) {
+      file.delete();
+    }
+  });
+
+  function respondWith(body: string | null, init: ResponseInit = {}) {
+    fetchMock.mockImplementation(async () => new Response(body, init));
+  }
+
+  async function download(...args: Parameters<typeof File.downloadFileAsync>) {
+    const file = await File.downloadFileAsync(...args);
+    downloaded.push(file);
+    return file;
+  }
+
+  it('returns a snapshot-backed file that holds the downloaded data', async () => {
+    respondWith('downloaded data', { headers: { 'Content-Type': 'text/csv;charset=utf-8' } });
+    const file = await download('https://example.com/files/report.csv', Paths.cache);
+    expect(file).toBeInstanceOf(File);
+    expect(file.uri.startsWith('blob:')).toBe(true);
+    expect(file.exists).toBe(true);
+    expect(file.size).toBe(15);
+    expect(file.type).toBe('text/csv;charset=utf-8');
+    expect(await file.text()).toBe('downloaded data');
+    // Reads come from memory, not from the network again.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await new File(file.uri).text()).toBe('downloaded data');
+  });
+
+  describe('name', () => {
+    it('comes from a File destination first', async () => {
+      respondWith('x', { headers: { 'Content-Disposition': 'attachment; filename="server.txt"' } });
+      const file = await download(
+        'https://example.com/url.txt',
+        new File(Paths.document, 'mine.txt')
+      );
+      expect(file.name).toBe('mine.txt');
+    });
+
+    it.each([
+      ['a quoted filename', 'attachment; filename="report 2026.pdf"', 'report 2026.pdf'],
+      ['an unquoted filename', 'attachment; filename=report.pdf', 'report.pdf'],
+      ['an escaped quote', 'attachment; filename="say \\"hi\\".txt"', 'say "hi".txt'],
+      [
+        'an encoded filename*, preferred over filename',
+        `attachment; filename="fallback.txt"; filename*=UTF-8''%C5%BC%C3%B3%C5%82w.txt`,
+        'żółw.txt',
+      ],
+      ['a path, which is dropped', 'attachment; filename="../../etc/passwd"', 'passwd'],
+      [
+        'filename when filename* is malformed',
+        `attachment; filename*=UTF-8''%ZZ.txt; filename="ok.txt"`,
+        'ok.txt',
+      ],
+    ])('comes from Content-Disposition with %s', async (_, header, name) => {
+      respondWith('x', { headers: { 'Content-Disposition': header } });
+      const file = await download('https://example.com/url-name.bin', Paths.cache);
+      expect(file.name).toBe(name);
+    });
+
+    it.each([
+      ['the last path segment', 'https://example.com/a/b%20c.png?size=2#top', 'b c.png'],
+      ['the last non-empty segment', 'https://example.com/a/archive/', 'archive'],
+      ['download for a URL without a path', 'https://example.com/', 'download'],
+      ['download for a data: URL', 'data:text/plain,hello', 'download'],
+      ['download for a malformed percent-encoding', 'https://example.com/a/%E9.txt', 'download'],
+    ])('falls back to %s of the URL', async (_, url, name) => {
+      respondWith('x');
+      const file = await download(url, Paths.cache);
+      expect(file.name).toBe(name);
+    });
+
+    it('falls back to the URL when filename* is malformed and there is no filename', async () => {
+      respondWith('x', {
+        headers: { 'Content-Disposition': `attachment; filename*=UTF-8''%ZZ.txt` },
+      });
+      const file = await download('https://example.com/from-url.txt', Paths.cache);
+      expect(file.name).toBe('from-url.txt');
+    });
+
+    it('comes from the URL after redirects', async () => {
+      fetchMock.mockImplementation(async () => {
+        const response = new Response('x');
+        Object.defineProperty(response, 'url', { value: 'https://cdn.example.com/real.zip' });
+        return response;
+      });
+      const file = await download('https://example.com/latest', Paths.cache);
+      expect(file.name).toBe('real.zip');
+    });
+  });
+
+  it('sends the headers from the options', async () => {
+    respondWith('x');
+    await download('https://example.com/a.txt', Paths.cache, {
+      headers: { Authorization: 'Bearer token' },
+    });
+    const init = fetchMock.mock.calls[0]![1]!;
+    expect(init.headers).toEqual({ Authorization: 'Bearer token' });
+  });
+
+  it('downloads a data: URL with the real fetch', async () => {
+    fetchMock.mockRestore();
+    const file = await download('data:application/json,{"a":1}', Paths.cache);
+    expect(await file.json()).toEqual({ a: 1 });
+    expect(file.type).toBe('application/json');
+    expect(file.name).toBe('download');
+  });
+
+  it('sends one final progress event with the downloaded size', async () => {
+    respondWith('12345');
+    const onProgress = jest.fn();
+    await download('https://example.com/a.txt', Paths.cache, { onProgress });
+    expect(onProgress.mock.calls).toEqual([[{ bytesWritten: 5, totalBytes: 5 }]]);
+  });
+
+  it('rejects with the URL and the status for a non-2xx response, and creates no file', async () => {
+    const response = new Response('nope', { status: 403, statusText: 'Forbidden' });
+    fetchMock.mockResolvedValue(response);
+    const createObjectURL = jest.spyOn(URL, 'createObjectURL');
+    const url = 'https://example.com/secret.txt';
+    const error = await File.downloadFileAsync(url, Paths.cache).catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain(url);
+    expect(error.message).toContain('403 Forbidden');
+    expect(createObjectURL).not.toHaveBeenCalled();
+    createObjectURL.mockRestore();
+  });
+
+  it('rejects with an AbortError when the signal aborts, because the signal goes to fetch', async () => {
+    fetchMock.mockImplementation(
+      (_, init) =>
+        new Promise((_, reject) => {
+          init!.signal!.addEventListener('abort', () =>
+            reject(new DOMException('This operation was aborted', 'AbortError'))
+          );
+        })
+    );
+    const controller = new AbortController();
+    const promise = File.downloadFileAsync('https://example.com/slow.bin', Paths.cache, {
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    expect(fetchMock.mock.calls[0]![1]!.signal).toBe(controller.signal);
+    controller.abort('user left');
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError', message: 'user left' });
+  });
+
+  it('rejects with an AbortError when the signal aborts while the body is read', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(async () => {
+      const response = new Response('partial');
+      // The headers arrived, then the abort stops the body.
+      response.blob = async () => {
+        controller.abort('user left');
+        throw new DOMException('This operation was aborted', 'AbortError');
+      };
+      return response;
+    });
+    const createObjectURL = jest.spyOn(URL, 'createObjectURL');
+    const error = await File.downloadFileAsync('https://example.com/big.bin', Paths.cache, {
+      signal: controller.signal,
+    }).catch((e) => e);
+    // The shared AbortError carries the abort reason, not the browser's DOMException.
+    expect(error).not.toBeInstanceOf(DOMException);
+    expect(error).toMatchObject({ name: 'AbortError', message: 'user left' });
+    expect(createObjectURL).not.toHaveBeenCalled();
+    createObjectURL.mockRestore();
+  });
+
+  it('rejects with an AbortError without fetching when the signal is already aborted', async () => {
+    await expect(
+      File.downloadFileAsync('https://example.com/a.txt', Paths.cache, {
+        signal: AbortSignal.abort(),
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('File on web, unsupported members', () => {
   const file = () => File.fromWebFile(makeWebFile());
 
