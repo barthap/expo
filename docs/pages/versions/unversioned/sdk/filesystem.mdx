@@ -4,7 +4,7 @@ description: A library that provides access to the local file system on the devi
 sourceCodeUrl: 'https://github.com/expo/expo/tree/main/packages/expo-file-system'
 packageName: 'expo-file-system'
 iconUrl: '/static/images/packages/expo-file-system.png'
-platforms: ['android', 'ios', 'tvos', 'expo-go']
+platforms: ['android', 'ios', 'tvos', 'web', 'expo-go']
 ---
 
 import APISection from '~/components/plugins/APISection';
@@ -391,6 +391,22 @@ try {
 ```
 
 </Collapsible>
+
+## Web support
+
+On web, `expo-file-system` has no persistent storage yet, so files cannot be created or written. `File`, `Directory`, and `Paths` still work for reading files, picking and downloading them, and building paths.
+
+- A `File` from `File.pickFileAsync()`, `File.downloadFileAsync()`, or `File.fromWebFile()` holds its data in memory. It is also a browser [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File), so you can pass it directly to `fetch()` or `FormData`. Its `uri` is a `blob:` URL, and `new File(file.uri)` returns a file with the same data. The data stays in memory until you call `delete()`, which also revokes the URL.
+- A `File` created from any other URI, such as a `data:` or `https:` URL, only has the URI. `text()`, `bytes()`, `arrayBuffer()`, `json()`, and `stream()` read it with `fetch()`. `size` and `slice()` throw, `lastModified` is `null`, and `exists` is `true` only for `data:` URIs.
+- `File.pickFileAsync()` opens the browser file dialog, so it must be called from a user gesture, such as a click handler. In Chrome 37 to 112 and Safari 15.4 to 16.3, which do not fire the `cancel` event on file inputs, the promise may never settle when the user closes the dialog.
+- `File.downloadFileAsync()` downloads into memory and ignores the location of the destination.
+- `Paths.cache`, `Paths.document`, and `Paths.bundle` are placeholder directories (`file:///cache/`, `file:///document/`, and `file:///bundle/`). They exist, but nothing can be stored in them yet.
+
+The following members are not available on web and throw or reject with an `UnavailabilityError`:
+
+- `File`: `write()`, `writeSync()`, `writableStream()`, `create()`, `copy()`, `copySync()`, `move()`, `moveSync()`, `rename()`, `open()`, `textSync()`, `bytesSync()`, `base64()`, `base64Sync()`, `digest()`, `info()`, `md5`, `modificationTime`, `creationTime`, `contentUri`, `upload()`, `createUploadTask()`, `File.createDownloadTask()`, `watch()`, `canPreview()`, and `preview()`.
+- `Directory`: `create()`, `createFile()`, `createDirectory()`, `delete()`, `copy()`, `copySync()`, `move()`, `moveSync()`, `rename()`, `list()`, `info()`, `size`, `watch()`, and `Directory.pickDirectoryAsync()`.
+- `Paths`: `info()`, `totalDiskSpace`, and `availableDiskSpace`.
 
 ## API
 
