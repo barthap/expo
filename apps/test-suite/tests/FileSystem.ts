@@ -22,15 +22,41 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     { describe, it, pending: t.pending },
     'https://httpbingo.org/get'
   );
-  const describeWithPermissions = shouldSkipTestsRequiringPermissions ? t.xdescribe : describe;
+  // On web, expo-file-system has no storage to write to, no watchers, no bundled files, and no
+  // path or disk info yet. Specs that need them are skipped there with `xit` and `xdescribe`, so
+  // the run lists them as skipped. The other platforms run them as usual.
+  const onWeb = Platform.OS === 'web';
+  // The picker specs exist only for Android and iOS. Every spec inside this block is gated to one
+  // of them, so on web the block is dropped entirely: an empty `describe` aborts the whole suite
+  // in the runner.
+  const describeWithPermissions = onWeb
+    ? () => {}
+    : shouldSkipTestsRequiringPermissions
+      ? t.xdescribe
+      : describe;
+  // Creates, writes, opens, lists, or downloads files.
+  const itWithStorage = onWeb ? t.xit : it;
+  const describeWithStorage = onWeb ? t.xdescribe : describe;
+  // Watches files or directories.
+  const describeWithWatchers = onWeb ? t.xdescribe : describe;
+  // Reads files bundled with the app.
+  const itWithBundle = onWeb ? t.xit : it;
+  // Reads `Paths.info()` or the disk space.
+  const describeWithPathInfo = onWeb ? t.xdescribe : describe;
+  // Expects the native clean-up of `file:` URIs (trailing slashes, the `localhost` host), which
+  // the web constructors do not do yet.
+  const itWithUriCleanup = onWeb ? t.xit : it;
 
-  const testDirectory = FS.documentDirectory + 'tests/';
+  // The legacy API has no directories on web, so the specs that run there use the placeholder.
+  const testDirectory = (onWeb ? Paths.document.uri : FS.documentDirectory) + 'tests/';
   const watcherDirectory = new Directory(Paths.cache, 'watcher-tests');
   t.beforeEach(async () => {
     try {
       await FS.makeDirectoryAsync(testDirectory);
     } catch {}
-    watcherDirectory.create({ idempotent: true, intermediates: true });
+    if (!onWeb) {
+      watcherDirectory.create({ idempotent: true, intermediates: true });
+    }
   });
   t.afterEach(async () => {
     try {
@@ -162,7 +188,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.uri).toBe('file:///path/to/file');
     });
 
-    it('Supports different slash combinations', async () => {
+    itWithUriCleanup('Supports different slash combinations', async () => {
       expect(new File('file:/path/to/file').uri).toBe('file:///path/to/file');
 
       // This URL is confusing, as path is actually a hostname.
@@ -174,12 +200,12 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(new File('file:///path/to/file').uri).toBe('file:///path/to/file');
     });
 
-    it('Accepts and correctly handles uris to files', () => {
+    itWithUriCleanup('Accepts and correctly handles uris to files', () => {
       expect(new File('file:/path/to/file').uri).toBe('file:///path/to/file');
       expect(new File('file:/path/to/file/').uri).toBe('file:///path/to/file');
     });
 
-    it('Accepts and correctly handles uris to directories', () => {
+    itWithUriCleanup('Accepts and correctly handles uris to directories', () => {
       expect(new Directory('file:/path/to/file').uri).toBe('file:///path/to/file/');
       expect(new Directory('file:/path/to/file/').uri).toBe('file:///path/to/file/');
     });
@@ -192,7 +218,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }).toThrow();
     });
 
-    describe('When a wrong class already exists', () => {
+    describeWithStorage('When a wrong class already exists', () => {
       it("Doesn't allow operations when a file is used with an existing folder path", () => {
         const directory = new Directory(testDirectory, 'test');
         directory.create();
@@ -220,7 +246,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    it('Allows reading files from assets', async () => {
+    itWithBundle('Allows reading files from assets', async () => {
       const dir = new Directory(Paths.bundle);
 
       if (Platform.OS === 'ios') {
@@ -236,7 +262,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }
     });
 
-    describe('watching files and directories', () => {
+    describeWithWatchers('watching files and directories', () => {
       let originalTimeout: number;
 
       t.beforeAll(() => {
@@ -429,7 +455,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     }
 
-    describe('Works with %, # and space characters in names', () => {
+    describeWithStorage('Works with %, # and space characters in names', () => {
       it('Works with spaces as filename', () => {
         const outputFile = new File(testDirectory, 'my new file.txt');
         expect(outputFile.exists).toBe(false);
@@ -496,14 +522,14 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    it('Writes a string to a file reference', () => {
+    itWithStorage('Writes a string to a file reference', () => {
       const outputFile = new File(testDirectory, 'file.txt');
       expect(outputFile.exists).toBe(false);
       outputFile.writeSync('Hello world');
       expect(outputFile.exists).toBe(true);
     });
 
-    it('overwrites files by default when using write()', () => {
+    itWithStorage('overwrites files by default when using write()', () => {
       const file = new File(testDirectory, 'overwrite-test.txt');
       file.writeSync('First');
       expect(file.textSync()).toBe('First');
@@ -511,7 +537,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('Second');
     });
 
-    it('overwrites a longer file with a shorter string', () => {
+    itWithStorage('overwrites a longer file with a shorter string', () => {
       const file = new File(testDirectory, 'overwrite-shorter.txt');
       file.writeSync('This is a long string');
       expect(file.textSync()).toBe('This is a long string');
@@ -519,21 +545,24 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('Short');
     });
 
-    it('Writes a base64 encoded string to a file reference using File.writeSync', () => {
+    itWithStorage('Writes a base64 encoded string to a file reference using File.writeSync', () => {
       const outputFile = new File(testDirectory, 'file.txt');
       expect(outputFile.exists).toBe(false);
       outputFile.writeSync('SGVsbG8gd29ybGQh', { encoding: 'base64' });
       expect(outputFile.textSync()).toEqual('Hello world!');
     });
 
-    it('Writes a base64 encoded string to a file reference using File.write', async () => {
-      const outputFile = new File(testDirectory, 'file_async.txt');
-      expect(outputFile.exists).toBe(false);
-      await outputFile.write('SGVsbG8gd29ybGQh', { encoding: 'base64' });
-      expect(outputFile.textSync()).toEqual('Hello world!');
-    });
+    itWithStorage(
+      'Writes a base64 encoded string to a file reference using File.write',
+      async () => {
+        const outputFile = new File(testDirectory, 'file_async.txt');
+        expect(outputFile.exists).toBe(false);
+        await outputFile.write('SGVsbG8gd29ybGQh', { encoding: 'base64' });
+        expect(outputFile.textSync()).toEqual('Hello world!');
+      }
+    );
 
-    it('Writes a string to a file reference using File.writeSync', async () => {
+    itWithStorage('Writes a string to a file reference using File.writeSync', async () => {
       const outputFile = new File(testDirectory, 'file.txt');
       outputFile.create();
       outputFile.writeSync(new Uint8Array([97, 98, 99]));
@@ -544,7 +573,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(outputFile.textSync()).toBe('abc');
     });
 
-    it('Writes a string to a file reference using File.write', async () => {
+    itWithStorage('Writes a string to a file reference using File.write', async () => {
       const outputFile = new File(testDirectory, 'file_async.txt');
       outputFile.create();
       await outputFile.write('0abcd');
@@ -552,7 +581,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(await outputFile.text()).toBe('0abcd');
     });
 
-    it('Reads a string from a file reference', async () => {
+    itWithStorage('Reads a string from a file reference', async () => {
       const outputFile = new File(testDirectory, 'file2.txt');
       outputFile.writeSync('Hello world');
       expect(outputFile.exists).toBe(true);
@@ -562,7 +591,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(contentSync).toBe('Hello world');
     });
 
-    describe('Append option', () => {
+    describeWithStorage('Append option', () => {
       it('appends a string using legacy writeAsStringAsync', async () => {
         const fileUri = testDirectory + 'legacy-append.txt';
         await FS.writeAsStringAsync(fileUri, 'Hello');
@@ -626,7 +655,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    it('Deletes a file reference', () => {
+    itWithStorage('Deletes a file reference', () => {
       const outputFile = new File(testDirectory, 'file3.txt');
       outputFile.writeSync('Hello world');
       expect(outputFile.exists).toBe(true);
@@ -636,7 +665,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
 
     // write 2 tests that tests recursive directory deletion both for regular and for a saf directory
-    it('recursively deletes a regular directory', () => {
+    itWithStorage('recursively deletes a regular directory', () => {
       const parentDir = new Directory(testDirectory, 'parent');
       parentDir.create();
       const childDir = new Directory(parentDir, 'child');
@@ -663,37 +692,40 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }
     });
 
-    it('Throws if a file does not exist', () => {
+    itWithStorage('Throws if a file does not exist', () => {
       const file = new File('file:///path/to/file');
       expect(() => file.delete()).toThrow();
     });
 
-    it('Creates a folder', () => {
+    itWithStorage('Creates a folder', () => {
       const folder = new Directory(testDirectory, 'newFolder');
       folder.create();
       expect(folder.exists).toBe(true);
     });
 
-    it('Creates a folder without a slash', () => {
+    itWithStorage('Creates a folder without a slash', () => {
       const folder = new Directory(testDirectory, 'newFolder2');
       folder.create();
       expect(folder.exists).toBe(true);
     });
 
-    it('Creates a folder with subdirectories if intermediates is set', () => {
+    itWithStorage('Creates a folder with subdirectories if intermediates is set', () => {
       const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
       folder.create({ intermediates: true });
       expect(folder.exists).toBe(true);
     });
 
-    it('Throws en error while creating a folder with subdirectories if intermediates is not set', () => {
-      const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
-      expect(() => folder.create()).toThrow();
-      expect(() => folder.create({ intermediates: false })).toThrow();
-      expect(folder.exists).toBe(false);
-    });
+    itWithStorage(
+      'Throws en error while creating a folder with subdirectories if intermediates is not set',
+      () => {
+        const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
+        expect(() => folder.create()).toThrow();
+        expect(() => folder.create({ intermediates: false })).toThrow();
+        expect(folder.exists).toBe(false);
+      }
+    );
 
-    it('throws an error if the directory already exists and idempotent is false', () => {
+    itWithStorage('throws an error if the directory already exists and idempotent is false', () => {
       const directory = new Directory(testDirectory, 'test');
       directory.create();
       let error;
@@ -705,33 +737,36 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(error).toBeDefined();
     });
 
-    it('does not throw an error if the directory already exists and idempotent is true', () => {
-      const directory = new Directory(testDirectory, 'test');
-      directory.create();
-      let error;
-      try {
-        directory.create({ idempotent: true });
-      } catch (e) {
-        error = e;
+    itWithStorage(
+      'does not throw an error if the directory already exists and idempotent is true',
+      () => {
+        const directory = new Directory(testDirectory, 'test');
+        directory.create();
+        let error;
+        try {
+          directory.create({ idempotent: true });
+        } catch (e) {
+          error = e;
+        }
+        expect(error).not.toBeDefined();
       }
-      expect(error).not.toBeDefined();
-    });
+    );
 
-    it('Creates an empty file', () => {
+    itWithStorage('Creates an empty file', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
       expect(file.exists).toBe(true);
       expect(file.textSync()).toBe('');
     });
 
-    it('Throws an error if the file exists', () => {
+    itWithStorage('Throws an error if the file exists', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
       expect(file.exists).toBe(true);
       expect(file.textSync()).toBe('');
     });
 
-    it('Overwrites a file if it exists and `overwrite` is set', () => {
+    itWithStorage('Overwrites a file if it exists and `overwrite` is set', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
       expect(file.exists).toBe(true);
@@ -741,7 +776,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('');
     });
 
-    it('Deletes a folder', () => {
+    itWithStorage('Deletes a folder', () => {
       const folder = new Directory(testDirectory, 'newFolder');
       folder.create();
       expect(folder.exists).toBe(true);
@@ -750,7 +785,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(folder.exists).toBe(false);
     });
 
-    it('Deletes a folder containing another folder', () => {
+    itWithStorage('Deletes a folder containing another folder', () => {
       const folder = new Directory(testDirectory, 'newFolder2');
       folder.create();
 
@@ -763,7 +798,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(folder.exists).toBe(false);
     });
 
-    describe('When copying a file', () => {
+    describeWithStorage('When copying a file', () => {
       it("Throws an error when it doesn't exist", () => {
         const src = new File(testDirectory, 'file.txt');
         const dstFolder = new Directory(testDirectory, 'destination');
@@ -848,7 +883,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('When copying a directory', () => {
+    describeWithStorage('When copying a directory', () => {
       it('copies it to a folder', () => {
         const src = new Directory(testDirectory, 'directory');
         src.create();
@@ -898,7 +933,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('When moving a file', () => {
+    describeWithStorage('When moving a file', () => {
       it("Throws an error when it doesn't exist", () => {
         const src = new File(testDirectory, 'file.txt');
         const dstFolder = new Directory(testDirectory, 'destination');
@@ -967,7 +1002,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('When renaming a file', () => {
+    describeWithStorage('When renaming a file', () => {
       it('renames a file and updates its uri and existence', () => {
         const originalFile = new File(testDirectory, 'original.txt');
         originalFile.writeSync('Hello world');
@@ -1047,7 +1082,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('When moving a directory', () => {
+    describeWithStorage('When moving a directory', () => {
       it('moves it to a folder', () => {
         const src = new Directory(testDirectory, 'directory/');
         src.create();
@@ -1455,7 +1490,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     }
 
-    describe('When renaming a directory', () => {
+    describeWithStorage('When renaming a directory', () => {
       it('renames a directory and updates its uri and parent listing', () => {
         const originalDir = new Directory(testDirectory, 'oldName/');
         originalDir.create();
@@ -1549,7 +1584,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Downloads files', () => {
+    describeWithStorage('Downloads files', () => {
       let originalTimeout: number;
 
       t.beforeAll(async () => {
@@ -1799,7 +1834,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Computes file properties', () => {
+    describeWithStorage('Computes file properties', () => {
       it('computes size', async () => {
         const file = new File(testDirectory, 'file.txt');
         file.writeSync('Hello world');
@@ -1887,7 +1922,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Computes directory properties', () => {
+    describeWithStorage('Computes directory properties', () => {
       it('computes size', async () => {
         const dir = new Directory(testDirectory, 'directory');
         const file = new File(testDirectory, 'directory', 'file.txt');
@@ -1897,7 +1932,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Returns base64', () => {
+    describeWithStorage('Returns base64', () => {
       it('gets base64 of a file', async () => {
         const src = new File(testDirectory, 'file.txt');
         src.writeSync('Hello world');
@@ -1906,7 +1941,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Returns bytes', () => {
+    describeWithStorage('Returns bytes', () => {
       it('gets file as a Uint8Array', async () => {
         const src = new File(testDirectory, 'file.txt');
         src.writeSync('Hello world');
@@ -1916,7 +1951,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Returns path info', () => {
+    describeWithPathInfo('Returns path info', () => {
       it('correctly if exists and is a directory', () => {
         const uri = testDirectory + 'correctly_if_exists_and_is_a_directory';
         const src = new Directory(uri);
@@ -1946,7 +1981,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describe('Lists directory contents', () => {
+    describeWithStorage('Lists directory contents', () => {
       it('for newly created directories', () => {
         new File(testDirectory, 'file.txt').create();
         new Directory(testDirectory, 'directory').create();
@@ -1959,11 +1994,11 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
 
     describe('JS-only properties for path manipulation', () => {
-      it('return parentDirectory for files', () => {
+      itWithUriCleanup('return parentDirectory for files', () => {
         const file = new File(testDirectory, 'image.jpeg');
         expect(file.parentDirectory.uri).toBe(new Directory(testDirectory).uri);
       });
-      it('return parentDirectory for directories', () => {
+      itWithUriCleanup('return parentDirectory for directories', () => {
         const directory = new Directory(testDirectory, '/testdirectory/sampleDir');
         expect(directory.parentDirectory.parentDirectory.uri).toBe(
           new Directory(testDirectory).uri
@@ -1981,7 +2016,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         );
       });
 
-      it('joins paths in the File and Directory constructors', () => {
+      itWithUriCleanup('joins paths in the File and Directory constructors', () => {
         expect(new File('file:///path', 'to', '..', 'file').uri).toBe('file:///path/file');
         expect(new Directory('file:///path', 'to', '..', 'directory').uri).toBe(
           'file:///path/directory/'
@@ -1990,21 +2025,24 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
 
     describe('Exposes common app directories', () => {
+      // The legacy API has no directories on web, where these are placeholders.
+      const cacheDirectory = onWeb ? 'file:///cache/' : FS.cacheDirectory!;
+      const documentDirectory = onWeb ? 'file:///document/' : FS.documentDirectory!;
       it('exposes cache directory', () => {
         expect(Paths.cache instanceof Directory).toBe(true);
-        expect(Paths.cache.uri).toBe(FS.cacheDirectory!);
+        expect(Paths.cache.uri).toBe(cacheDirectory);
       });
       it('exposes document directory', () => {
         expect(Paths.document instanceof Directory).toBe(true);
-        expect(Paths.document.uri).toBe(FS.documentDirectory!);
+        expect(Paths.document.uri).toBe(documentDirectory);
       });
       it('can be easily used with joining paths', () => {
         const file = new File(Paths.document, 'file.txt');
-        expect(file.uri).toBe(FS.documentDirectory + 'file.txt');
+        expect(file.uri).toBe(documentDirectory + 'file.txt');
       });
     });
 
-    describe('When getting file info', () => {
+    describeWithStorage('When getting file info', () => {
       it('executes correctly', () => {
         const url = `${testDirectory}execute_correctly.txt`;
         const src = new File(url);
@@ -2039,7 +2077,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         expect(result.exists).toBe(false);
       });
     });
-    describe('When getting directory info', () => {
+    describeWithStorage('When getting directory info', () => {
       it('executes correctly on an empty directory', () => {
         const url = `${testDirectory}executes_correctly_on_an_empty_directory/`;
         const src = new Directory(url);
@@ -2083,7 +2121,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     addAppleAppGroupsTestSuiteAsync({ describe, expect, it, ...t });
   });
 
-  describe('Exposes total filesystem sizes', () => {
+  describeWithPathInfo('Exposes total filesystem sizes', () => {
     it('Returns total filesystem space', () => {
       expect(Paths.totalDiskSpace > 100000).toBe(true);
     });
@@ -2092,7 +2130,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
   });
 
-  describe('Exposes file handles', () => {
+  describeWithStorage('Exposes file handles', () => {
     it('Allows opening files', () => {
       const src = new File(testDirectory, 'file.txt');
       src.writeSync('Hello world');
