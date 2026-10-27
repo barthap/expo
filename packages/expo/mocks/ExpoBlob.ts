@@ -44,7 +44,7 @@ class Blob {
     return sliced;
   }
 
-  async bytes(): Promise<Uint8Array> {
+  async bytes(): Promise<Uint8Array<ArrayBuffer>> {
     // A copy, like the native implementation: callers must not be able to mutate the blob
     // through the array they get back.
     return this._bytes.slice();

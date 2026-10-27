@@ -28,7 +28,7 @@ export declare class Blob {
   /**
    * @returns Promise resolving to the `Blob`'s binary data as a `Uint8Array`.
    */
-  bytes(): Promise<Uint8Array>;
+  bytes(): Promise<Uint8Array<ArrayBuffer>>;
 
   /**
    * @returns Promise that resolves with the entire contents of the `Blob` as a UTF-8 string.
@@ -57,7 +57,7 @@ export declare class NativeBlob extends SharedObject {
   constructor(blobParts?: (BlobPart | NativeBlob)[], options?: BlobPropertyBag);
 
   slice(start?: number, end?: number, contentType?: string): Blob;
-  bytes(): Promise<Uint8Array>;
+  bytes(): Promise<Uint8Array<ArrayBuffer>>;
   text(): Promise<string>;
 }
 
