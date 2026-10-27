@@ -1,4 +1,5 @@
 import { UnavailabilityError, uuid, type EventSubscription } from 'expo-modules-core';
+import { Blob as ExpoBlob } from 'expo/blob';
 import { Platform } from 'react-native';
 
 import { Directory } from './Directory';
@@ -14,7 +15,6 @@ import {
   type PickSingleFileOptions,
   type PickSingleFileResult,
 } from './File.types';
-import { FileSlice } from './FileSlice';
 import {
   type WatchEvent,
   type WatchOptions,
@@ -32,6 +32,20 @@ import { Paths } from './Paths';
 import { FileSystemWatcher } from './internal/FileSystemWatcher';
 import { FileSystemReadableStreamSource, FileSystemWritableSink } from './internal/streams';
 import { extname } from './pathUtilities/path';
+
+/**
+ * The `Blob` constructor of `expo/blob` takes any part with a method under this symbol and reads
+ * the returned byte range of the file on every read of the `Blob`, instead of copying the bytes.
+ */
+const FILE_RANGE: unique symbol = Symbol.for('expo.blob.fileRange');
+
+type FileRangeReference = { uri: string; offset: number; size: number };
+
+function fileRangePart(reference: FileRangeReference): BlobPart {
+  // The declared Blob part types do not include file ranges, which are internal to expo and
+  // expo-file-system, so the part is typed as a Blob part here.
+  return { [FILE_RANGE]: () => reference } as unknown as BlobPart;
+}
 
 /**
  * Represents a file on the filesystem.
@@ -417,23 +431,66 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * Returns a `Blob` with the bytes of this file from `start` up to, but not including, `end`.
    * Implements the `Blob.slice()` interface.
    *
-   * > **Note:** On web, `slice()` throws for a file that only has a URI, because its data is not
-   * > loaded. Read the data with `bytes()` first.
+   * The file is not read when the `Blob` is created. Its `size` is fixed when you call `slice()`,
+   * and the bytes are read from the file every time you read the `Blob`, so a read sees the
+   * current content of the file. If the file got shorter in the meantime, the read returns fewer
+   * bytes than `size`, and if the file was deleted, the read rejects. Throws if the file does not
+   * exist or cannot be read, and if the slice is larger than 2147483647 bytes (2 GiB). You can
+   * pass the returned `Blob` to `new Blob([...])`, `FormData`, and `fetch()` like any other `Blob`.
+   * Pass a `File` to `new Blob([file])` to get a `Blob` of the whole file in the same way.
+   *
+   * > **Note:** On iOS, files outside of the app sandbox that need security-scoped access are not
+   * > supported.
+   *
+   * > **Note:** On web, `slice()` returns a browser `Blob` with a copy of the bytes, and throws for
+   * > a file that only has a URI, because its data is not loaded. Read the data with `bytes()` first.
    *
    * @param start The index of the first byte to include.
    * @param end The index of the first byte to exclude.
-   * @param contentType The `type` of the returned `Blob`.
+   * @param contentType The `type` of the returned `Blob`. Defaults to an empty string. The `type` of
+   * the file is not inherited.
    */
   slice(start?: number, end?: number, contentType?: string): Blob {
     if (Platform.OS === 'web') {
       return super.slice(start, end, contentType);
     }
-    const fileSize = this.size ?? 0;
+    const fileSize = this.readableSize();
+    // Same as the native `Blob.slice()`: `NaN` becomes 0 and fractions are truncated.
+    const toIndex = (n: number | undefined) =>
+      n == null ? undefined : Number.isNaN(n) ? 0 : Math.trunc(n);
+    const from = toIndex(start);
+    const to = toIndex(end);
     const relStart =
-      start == null ? 0 : start < 0 ? Math.max(fileSize + start, 0) : Math.min(start, fileSize);
+      from == null ? 0 : from < 0 ? Math.max(fileSize + from, 0) : Math.min(from, fileSize);
     const relEnd =
-      end == null ? fileSize : end < 0 ? Math.max(fileSize + end, 0) : Math.min(end, fileSize);
-    return new FileSlice(this, relStart, Math.max(relStart, relEnd), contentType ?? this.type);
+      to == null ? fileSize : to < 0 ? Math.max(fileSize + to, 0) : Math.min(to, fileSize);
+    const reference = { uri: this.uri, offset: relStart, size: Math.max(relEnd - relStart, 0) };
+    return new ExpoBlob([fileRangePart(reference)], { type: contentType });
+  }
+
+  /**
+   * Returns the byte range of the whole file, so that `new Blob([file])` reads the file on every
+   * read of the `Blob` instead of copying it.
+   * @hidden
+   */
+  [FILE_RANGE](): FileRangeReference {
+    if (Platform.OS === 'web') {
+      throw new UnavailabilityError('expo-file-system', 'File[Symbol.for("expo.blob.fileRange")]');
+    }
+    return { uri: this.uri, offset: 0, size: this.readableSize() };
+  }
+
+  /**
+   * The size of the file, checked to be readable. `exists` goes through the read permission
+   * check, which a `Blob` reading the file later does not do.
+   */
+  private readableSize(): number {
+    if (!this.exists) {
+      throw new Error(
+        `Unable to read '${this.uri}': the file does not exist or the app has no read permission.`
+      );
+    }
+    return this.size;
   }
 
   /**

@@ -40,6 +40,18 @@ type Entry = {
 
 const store = new Map<string, Entry>();
 
+// expo's ExpoBlob mock has no file system of its own. It reads file-backed Blob parts, such as
+// `File.slice()`, through this reader, which sees the current content of the in-memory store.
+(globalThis as { [key: symbol]: unknown })[Symbol.for('expo.blob.mockFileReader')] = (
+  uri: string
+): Uint8Array => {
+  const entry = store.get(normalizeKey(uri));
+  if (!entry || entry.kind !== 'file' || !entry.exists) {
+    throw new Error(`Unable to read the file-backed Blob part from '${uri}'`);
+  }
+  return entry.bytes ?? new Uint8Array(0);
+};
+
 const SEED_DIRS = [documentDirectory, cacheDirectory, bundleDirectory];
 
 function seed() {

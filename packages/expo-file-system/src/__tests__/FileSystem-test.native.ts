@@ -1,6 +1,8 @@
+import { Blob } from 'expo/blob';
+
 import { __resetMockFileSystem } from '../../mocks/FileSystem';
 import { FileMode } from '../File.types';
-import { DownloadTask, File, Directory, Paths, UploadTask, FileSlice } from '../index';
+import { DownloadTask, File, Directory, Paths, UploadTask } from '../index';
 
 beforeEach(() => {
   __resetMockFileSystem();
@@ -554,7 +556,7 @@ describe('expo-file-system behavioral mock', () => {
   });
 });
 
-describe('File.slice() / FileSlice', () => {
+describe('File.slice()', () => {
   function makeFile(name: string, contents: string): File {
     const file = new File(Paths.cache, name);
     file.create();
@@ -562,11 +564,15 @@ describe('File.slice() / FileSlice', () => {
     return file;
   }
 
-  it('File.slice() returns a FileSlice, not a Blob with materialized data', () => {
+  it('File.slice() returns an expo Blob that reads the file lazily', async () => {
     const file = makeFile('slice-type.txt', 'hello world');
     const slice = file.slice(0, 5);
-    expect(slice).toBeInstanceOf(FileSlice);
+    // A real Blob from expo/blob, not only a Blob-like object, so it can be a part of new Blob([...])
+    expect(Object.prototype.isPrototypeOf.call(Blob.prototype, slice)).toBe(true);
     expect(slice.size).toBe(5);
+    // The bytes are read when the Blob is read, not when it is created
+    file.writeSync('HELLO world');
+    await expect(slice.text()).resolves.toBe('HELLO');
   });
 
   it('slice reads only the requested byte range', async () => {
@@ -628,14 +634,28 @@ describe('File.slice() / FileSlice', () => {
     await expect(slice.text()).resolves.toBe('full content');
   });
 
-  it('preserves contentType from File when not overridden', () => {
-    const dir = new Directory(Paths.cache, 'typed-slice');
-    dir.create();
-    const file = dir.createFile('data.json', 'application/json') as unknown as File;
-    file.writeSync('{"key":"value"}');
+  it('does not inherit the file type when contentType is not given', () => {
+    // Same as Blob.slice() and new Blob([file]): the type comes only from the contentType argument
+    const file = makeFile('typed.json', '{"key":"value"}');
+    Object.defineProperty(file, 'type', { get: () => 'application/json' });
+    expect(file.slice(0, 5).type).toBe('');
+    expect(file.slice(0, 5, 'application/json').type).toBe('application/json');
+  });
 
-    const slice = new File(file.uri).slice(0, 5);
-    expect(slice.type).toBeDefined();
+  it('truncates fractional indices', async () => {
+    // A non-integer index would make a malformed file range in expo/blob
+    const file = makeFile('fraction.txt', 'abcdefghij');
+    const slice = file.slice(1.5, 3.7);
+    expect(slice.size).toBe(2);
+    await expect(slice.text()).resolves.toBe('bc');
+  });
+
+  it('treats NaN indices as 0', async () => {
+    const file = makeFile('nan.txt', 'abcdefghij');
+    const slice = file.slice(NaN);
+    expect(slice.size).toBe(10);
+    await expect(slice.text()).resolves.toBe('abcdefghij');
+    expect(file.slice(2, NaN).size).toBe(0);
   });
 
   it('overrides contentType when provided', () => {
@@ -711,6 +731,51 @@ describe('File.slice() / FileSlice', () => {
     const [t1, t2] = await Promise.all([s1.text(), s2.text()]);
     expect(t1).toBe('abcde');
     expect(t2).toBe('fghij');
+  });
+});
+
+describe('File as a part of an expo Blob', () => {
+  function makeFile(name: string, contents: string): File {
+    const file = new File(Paths.cache, name);
+    file.create();
+    file.writeSync(contents);
+    return file;
+  }
+
+  it('new Blob([file]) reads the whole file without copying it up front', async () => {
+    const file = makeFile('whole.txt', 'hello');
+    const blob = new Blob([file]);
+    expect(blob.size).toBe(5);
+    file.writeSync('HELLO');
+    await expect(blob.text()).resolves.toBe('HELLO');
+  });
+
+  it('mixes slices with in-memory parts', async () => {
+    const file = makeFile('mixed.txt', 'abcdefghij');
+    const blob = new Blob(['x', file.slice(2, 5), new Uint8Array([33])]);
+    await expect(blob.text()).resolves.toBe('xcde!');
+  });
+
+  it('keeps the size of a slice when the file gets shorter, and reads fewer bytes', async () => {
+    const file = makeFile('truncated.txt', 'abcdefghij');
+    const slice = file.slice(4, 8);
+    file.writeSync('abcdef');
+    expect(slice.size).toBe(4);
+    await expect(slice.text()).resolves.toBe('ef');
+  });
+
+  it('rejects reads of a slice after the file was deleted', async () => {
+    const file = makeFile('deleted.txt', 'abcdefghij');
+    const slice = file.slice(0, 4);
+    file.delete();
+    await expect(slice.text()).rejects.toThrow(/Unable to read/);
+  });
+
+  it('throws when slicing a file that does not exist', () => {
+    // An empty Blob would hide the missing file until much later, for example in an upload
+    const file = new File(Paths.cache, 'missing.txt');
+    expect(() => file.slice(0, 1)).toThrow(/does not exist or the app has no read permission/);
+    expect(() => new Blob([file])).toThrow(/does not exist or the app has no read permission/);
   });
 });
 
