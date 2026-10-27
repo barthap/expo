@@ -6,6 +6,12 @@
 // than a JavaScript lookup-table loop. Decoding does not use `atob`: it accepts input that the
 // spec rejects (missing padding, non-zero extra bits) and cannot report how much input it read,
 // so decoding runs a table-driven loop over the bytes returned by the native `TextEncoder`.
+//
+// `fromBase64`, `fromHex` and `toHex` first try a native module that handles well-formed input
+// with the default options several times faster. It returns null for anything else, and the
+// JavaScript implementation then produces the spec's result or error.
+
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
 type Alphabet = 'base64' | 'base64url';
 type LastChunkHandling = 'loose' | 'strict' | 'stop-before-partial';
@@ -39,6 +45,44 @@ const typedArrayToStringTag = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),
   Symbol.toStringTag
 )!.get!;
+
+type NativeCodec = {
+  decodeBase64(string: string, url: boolean): Uint8Array | null;
+  decodeHex(string: string): Uint8Array | null;
+  encodeHex(bytes: Uint8Array): string;
+};
+
+// Resolved on first use, because the winter runtime installs these methods at startup.
+let nativeCodec: NativeCodec | null | undefined;
+
+function getNativeCodec(): NativeCodec | null {
+  if (nativeCodec === undefined) {
+    nativeCodec = requireOptionalNativeModule<NativeCodec>('ExpoUint8ArrayBase64');
+  }
+  return nativeCodec;
+}
+
+// Runs the native fast path. Returns null when the module is missing, throws, or returns a value
+// of the wrong type (it returns null for input it does not handle), so the caller runs the
+// JavaScript implementation.
+function tryNative<T>(
+  call: (codec: NativeCodec) => unknown,
+  isValid: (value: unknown) => value is T
+): T | null {
+  const codec = getNativeCodec();
+  if (!codec) {
+    return null;
+  }
+  try {
+    const result = call(codec);
+    return isValid(result) ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+const isUint8Array = (value: unknown): value is Uint8Array => value instanceof Uint8Array;
+const isString = (value: unknown): value is string => typeof value === 'string';
 
 let textEncoder: TextEncoder | undefined;
 let textDecoder: TextDecoder | undefined;
@@ -370,6 +414,10 @@ export function toBase64(this: unknown, ...args: unknown[]): string {
 export function toHex(this: unknown): string {
   const bytes = validateUint8Array(this);
   validateNotDetached(bytes);
+  const native = tryNative((codec) => codec.encodeHex(bytes), isString);
+  if (native !== null) {
+    return native;
+  }
   const out = new Uint8Array(bytes.length * 2);
   const outPairs = new Uint16Array(out.buffer);
   for (let i = 0; i < bytes.length; i++) {
@@ -387,6 +435,14 @@ export function fromBase64(string: unknown, ...args: unknown[]): Uint8Array {
   const options = getOptionsObject(args[0]);
   const alphabet = getAlphabet(options);
   const lastChunkHandling = getLastChunkHandling(options);
+
+  if (lastChunkHandling === 'loose') {
+    const url = alphabet === 'base64url';
+    const native = tryNative((codec) => codec.decodeBase64(input, url), isUint8Array);
+    if (native !== null) {
+      return native;
+    }
+  }
 
   // Every 4 characters decode to at most 3 bytes, and a final chunk of 2 or 3 to at most 2.
   const into = new Uint8Array(Math.ceil(input.length / 4) * 3);
@@ -428,6 +484,10 @@ export function setFromBase64(
 export function fromHex(string: unknown): Uint8Array {
   const input = requireString(string);
   validateHexLength(input);
+  const native = tryNative((codec) => codec.decodeHex(input), isUint8Array);
+  if (native !== null) {
+    return native;
+  }
   const into = new Uint8Array(input.length >> 1);
   const result = decodeHexInto(input, into);
   if (result.error) {

@@ -474,3 +474,86 @@ describe('installUint8ArrayBase64', () => {
     expect(Uint8Array.prototype.toHex.call(bytes(0xab))).toBe('ab');
   });
 });
+
+describe('native fast path', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // Loads a fresh copy of the module with `nativeModule` as the ExpoUint8ArrayBase64 module.
+  const loadWithNative = (nativeModule: object | null): typeof import('../Uint8ArrayBase64') => {
+    let loaded: typeof import('../Uint8ArrayBase64') | undefined;
+    jest.isolateModules(() => {
+      jest
+        .spyOn(require('expo-modules-core'), 'requireOptionalNativeModule')
+        .mockImplementation((name) => (name === 'ExpoUint8ArrayBase64' ? nativeModule : null));
+      loaded = require('../Uint8ArrayBase64');
+    });
+    return loaded!;
+  };
+  const unsupported = () => {
+    throw new Error('The input is not well-formed for the native decoder');
+  };
+
+  it('returns what the native module returns for default options', () => {
+    const decoded = bytes(1, 2, 3);
+    const native = {
+      decodeBase64: jest.fn(() => decoded),
+      decodeHex: jest.fn(() => decoded),
+      encodeHex: jest.fn(() => 'native'),
+    };
+    const module = loadWithNative(native);
+    expect(module.fromBase64('AQID')).toBe(decoded);
+    expect(native.decodeBase64).toHaveBeenCalledWith('AQID', false);
+    expect(module.fromBase64('AQID', { alphabet: 'base64url' })).toBe(decoded);
+    expect(native.decodeBase64).toHaveBeenLastCalledWith('AQID', true);
+    expect(module.fromHex('010203')).toBe(decoded);
+    expect(module.toHex.call(bytes(1))).toBe('native');
+  });
+
+  // The native module returns null for input it does not handle. A throw (for example a failed
+  // argument conversion) must not reach the caller either.
+  it.each([
+    ['returns null', () => null],
+    ['throws', unsupported],
+  ])('runs the JavaScript implementation when the native module %s', (_, notHandled) => {
+    const module = loadWithNative({
+      decodeBase64: notHandled,
+      decodeHex: notHandled,
+      encodeHex: notHandled,
+    });
+    expect(module.fromBase64(' Zg = = ')).toEqual(text('f'));
+    expect(() => module.fromBase64('Zg=')).toThrow(SyntaxError);
+    expect(module.fromHex('abCD')).toEqual(bytes(0xab, 0xcd));
+    expect(() => module.fromHex('zz')).toThrow(SyntaxError);
+    expect(module.toHex.call(bytes(0xab))).toBe('ab');
+  });
+
+  it('runs the JavaScript implementation when the native module returns the wrong type', () => {
+    const module = loadWithNative({
+      decodeBase64: () => undefined,
+      decodeHex: () => undefined,
+      encodeHex: () => undefined,
+    });
+    expect(module.fromBase64('Zg==')).toEqual(text('f'));
+    expect(module.fromHex('ab')).toEqual(bytes(0xab));
+    expect(module.toHex.call(bytes(0xab))).toBe('ab');
+  });
+
+  it('skips the native module for options it does not handle', () => {
+    const native = {
+      decodeBase64: jest.fn(unsupported),
+      decodeHex: unsupported,
+      encodeHex: unsupported,
+    };
+    const module = loadWithNative(native);
+    expect(module.fromBase64('Zm8', { lastChunkHandling: 'stop-before-partial' })).toEqual(bytes());
+    expect(() => module.fromBase64('Zm8', { lastChunkHandling: 'strict' })).toThrow(SyntaxError);
+    expect(native.decodeBase64).not.toHaveBeenCalled();
+  });
+
+  it('runs without the native module, as the other tests in this file do', () => {
+    const module = loadWithNative(null);
+    expect(module.fromBase64('Zg==')).toEqual(text('f'));
+  });
+});
