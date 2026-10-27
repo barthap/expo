@@ -30,6 +30,7 @@ import {
 import { Paths } from './Paths';
 import { FileSystemWatcher } from './internal/FileSystemWatcher';
 import { FileSystemReadableStreamSource, FileSystemWritableSink } from './internal/streams';
+import { extname } from './pathUtilities/path';
 
 /**
  * Represents a file on the filesystem.
@@ -208,6 +209,21 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
   }
 
   /**
+   * Wraps a browser `File` (for example from an `<input type="file">` or a drop event) in a `File`
+   * from this module. The returned file reads from the same data and keeps its `name`, `type`, and
+   * `lastModified`. Its `uri` is a `blob:` URL, so `new File(file.uri)` returns a file with the same
+   * data until you call `delete()`.
+   * @param webFile The browser `File` to wrap.
+   * @platform web
+   */
+  static fromWebFile(webFile: globalThis.File): File {
+    if (Platform.OS !== 'web') {
+      throw new UnavailabilityError('expo-file-system', 'File.fromWebFile');
+    }
+    return super.fromWebFile(webFile) as File;
+  }
+
+  /**
    * Creates an instance of a file. It can be created for any path, and does not need to exist on the filesystem during creation.
    *
    * The constructor accepts an array of strings that are joined to create the file URI. The first argument can also be a `Directory` instance (like `Paths.cache`) or a `File` instance (which creates a new reference to the same file).
@@ -234,14 +250,28 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * @example '.png'
    */
   get extension() {
-    return Paths.extname(this.uri);
+    return extname(this.name);
   }
 
   /**
    * File name. Includes the extension.
    */
   get name() {
-    return Paths.basename(this.uri);
+    // On web, `super.name` is the browser `File` name slot, which also holds the original name
+    // of a picked or wrapped file. On native, there is no such getter and it is `undefined`.
+    return super.name || Paths.basename(this.uri);
+  }
+
+  /**
+   * Returns a browser `File` with the data, `name`, `type`, and `lastModified` of this file.
+   * Use it when a browser API needs a plain `File` instance.
+   * @platform web
+   */
+  toWebFile(): globalThis.File {
+    if (Platform.OS !== 'web') {
+      throw new UnavailabilityError('expo-file-system', 'File.toWebFile');
+    }
+    return super.toWebFile();
   }
 
   /**
@@ -253,6 +283,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * @return A byte-oriented `ReadableStream` backed by this file.
    */
   readableStream() {
+    if (Platform.OS === 'web') {
+      return super.readableStream();
+    }
     return new ReadableStream(new FileSystemReadableStreamSource(super.open(FileMode.ReadOnly)));
   }
 
@@ -264,12 +297,18 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * @return A `WritableStream` that accepts `Uint8Array` chunks.
    */
   writableStream() {
+    if (Platform.OS === 'web') {
+      return super.writableStream();
+    }
     return new WritableStream<Uint8Array>(
       new FileSystemWritableSink(super.open(FileMode.WriteOnly))
     );
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
+    if (Platform.OS === 'web') {
+      return super.arrayBuffer();
+    }
     const bytes = await this.bytes();
     return bytes.buffer as ArrayBuffer;
   }
@@ -291,10 +330,16 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * @return A byte-oriented `ReadableStream` backed by this file.
    */
   stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+    if (Platform.OS === 'web') {
+      return super.stream();
+    }
     return this.readableStream();
   }
 
   slice(start?: number, end?: number, contentType?: string): Blob {
+    if (Platform.OS === 'web') {
+      return super.slice(start, end, contentType);
+    }
     return new Blob([this.bytesSync().slice(start, end)], { type: contentType });
   }
 

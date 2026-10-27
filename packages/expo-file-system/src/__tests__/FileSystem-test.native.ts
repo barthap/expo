@@ -180,6 +180,17 @@ describe('expo-file-system new API', () => {
     expect(file.name).toBe('test.txt');
     expect(file.extension).toBe('.txt');
   });
+
+  it('File.extension keeps the extension of a name that parses as a URL', () => {
+    // The decoded names `x:y#z.png` and `note:ideas#1.txt` look like a URL with a scheme and a
+    // fragment, so `Paths.extname(name)` would read the URL pathname and drop the extension.
+    const picture = new File('file:///a/x:y%23z.png');
+    expect(picture.name).toBe('x:y#z.png');
+    expect(picture.extension).toBe('.png');
+    const note = new File('file:///a/note%3Aideas%231.txt');
+    expect(note.name).toBe('note:ideas#1.txt');
+    expect(note.extension).toBe('.txt');
+  });
 });
 
 describe('expo-file-system behavioral mock', () => {

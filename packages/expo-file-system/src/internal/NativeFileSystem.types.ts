@@ -348,6 +348,43 @@ export declare class NativeFileSystemFile {
    * @platform android
    */
   contentUri: string;
+
+  // The members below exist only on the web backend, which extends the browser `File`.
+  // The shared `File` class reaches them through `super` behind a `Platform.OS === 'web'` check,
+  // so native code never calls them.
+
+  /**
+   * @hidden The `File.name` slot on web. `undefined` on native.
+   */
+  get name(): string | undefined;
+  /**
+   * @hidden Web only.
+   */
+  arrayBuffer(): Promise<ArrayBuffer>;
+  /**
+   * @hidden Web only.
+   */
+  stream(): ReadableStream<Uint8Array<ArrayBuffer>>;
+  /**
+   * @hidden Web only.
+   */
+  slice(start?: number, end?: number, contentType?: string): Blob;
+  /**
+   * @hidden Web only.
+   */
+  readableStream(): ReadableStream<Uint8Array<ArrayBuffer>>;
+  /**
+   * @hidden Web only.
+   */
+  writableStream(): WritableStream<Uint8Array>;
+  /**
+   * @hidden Web only.
+   */
+  toWebFile(): globalThis.File;
+  /**
+   * @hidden Web only.
+   */
+  static fromWebFile(webFile: globalThis.File): NativeFileSystemFile;
 }
 
 type UploadTaskEvents = {
