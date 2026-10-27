@@ -6,7 +6,7 @@ export const name = 'FileSystemWeb';
 
 // Runs the web backend of expo-file-system against the browser's own `File`, `Blob`, `FormData`,
 // and `URL.createObjectURL`, which jest can only approximate.
-export async function test({ afterEach, describe, expect, it }: JasmineInterface) {
+export async function test({ afterEach, describe, expect, it, pending }: JasmineInterface) {
   // `File.fromWebFile()` keeps the data in memory until `delete()`, so every test cleans up.
   const createdFiles: File[] = [];
 
@@ -224,6 +224,84 @@ export async function test({ afterEach, describe, expect, it }: JasmineInterface
         expect(/<!DOCTYPE|<html/i.test(html)).toBe(true);
         // The dev server may add a `charset` parameter, which `type` keeps.
         expect(essenceOf(file.type)).toBe('text/html');
+      });
+    });
+
+    describe('downloadFileAsync', () => {
+      async function download(...args: Parameters<typeof File.downloadFileAsync>) {
+        const file = await File.downloadFileAsync(...args);
+        createdFiles.push(file);
+        return file;
+      }
+
+      // The MIME type without its parameters, for example `text/html` for `text/html; charset=utf-8`.
+      function essenceOf(type: string): string {
+        return type.split(';')[0]!.trim();
+      }
+
+      it('downloads a data: URL into memory and takes the name of a File destination', async () => {
+        const progress: { bytesWritten: number; totalBytes: number }[] = [];
+        const file = await download(
+          'data:text/plain,hello%20web',
+          new File(Paths.cache, 'greeting.txt'),
+          { onProgress: (event) => progress.push(event) }
+        );
+        expect(file.uri.startsWith('blob:')).toBe(true);
+        expect(file.exists).toBe(true);
+        expect(file.name).toBe('greeting.txt');
+        expect(essenceOf(file.type)).toBe('text/plain');
+        expect(file.size).toBe(9);
+        expect(await file.text()).toBe('hello web');
+        expect(await (await fetch(file.uri)).text()).toBe('hello web');
+        expect(progress).toEqual([{ bytesWritten: 9, totalBytes: 9 }]);
+      });
+
+      it('downloads a same-origin http: URL and takes the name from its path', async () => {
+        // The dev server serves the test-suite page itself, so its URL always exists.
+        const file = await download(location.href, Paths.document);
+        expect(file.name).toBe(location.pathname.split('/').filter(Boolean).pop() ?? 'download');
+        expect(essenceOf(file.type)).toBe('text/html');
+        expect(/<!DOCTYPE|<html/i.test(await file.text())).toBe(true);
+        expect(file.size > 0).toBe(true);
+      });
+
+      it('rejects with an AbortError when the signal aborts during the fetch', async () => {
+        const controller = new AbortController();
+        const promise = File.downloadFileAsync(location.href, Paths.cache, {
+          signal: controller.signal,
+        });
+        controller.abort();
+        let error: any = null;
+        try {
+          createdFiles.push(await promise);
+        } catch (e) {
+          error = e;
+        }
+        expect(error?.name).toBe('AbortError');
+      });
+    });
+
+    describe('pickFileAsync', () => {
+      // The real dialog needs a click by a person, so picking itself is a manual check. Events that
+      // a test dispatches do not count as user activation.
+      it('throws ERR_USER_ACTIVATION outside a user gesture instead of waiting forever', async () => {
+        const activation = (navigator as any).userActivation;
+        if (!activation) {
+          pending('this browser has no navigator.userActivation, so the picker cannot tell');
+          return;
+        }
+        if (activation.isActive) {
+          pending('the page has user activation (for example a click to start the tests)');
+          return;
+        }
+        let error: any = null;
+        try {
+          await File.pickFileAsync();
+        } catch (e) {
+          error = e;
+        }
+        expect(error?.code).toBe('ERR_USER_ACTIVATION');
+        expect(document.querySelector('input[type="file"]')).toBe(null);
       });
     });
 
