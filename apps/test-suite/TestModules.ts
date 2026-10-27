@@ -78,7 +78,8 @@ export function getTestModules() {
     require('./tests/ImageManipulator'),
     require('./tests/Clipboard'),
     require('./tests/Fetch'),
-    require('./tests/SQLite')
+    require('./tests/SQLite'),
+    require('./tests/wpt/FileAPI')
   );
 
   if (Platform.OS !== 'android') {
