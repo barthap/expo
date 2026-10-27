@@ -8,6 +8,9 @@ const config = getDefaultConfig(__dirname);
 // Disable Babel's RC lookup, reducing the config loading in Babel - resulting in faster bootup for transformations
 config.transformer.enableBabelRCLookup = false;
 
+// `tests/SQLite.ts` loads its own SQLite WebAssembly build on web
+config.resolver.assetExts.push('wasm');
+
 if (process.env.E2E_FORCE_BABEL === '1') {
   config.transformer.babelTransformerPath =
     require.resolve('../router-e2e/forced-babel-transformer');

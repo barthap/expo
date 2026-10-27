@@ -72,6 +72,7 @@ export function getTestModules() {
     require('./tests/Crypto'),
     require('./tests/CryptoAES'),
     require('./tests/KeepAwake'),
+    require('./tests/Blob'),
     require('./tests/Blur'),
     require('./tests/HTML'),
     require('./tests/ImageManipulator'),
@@ -91,7 +92,6 @@ export function getTestModules() {
     modules.push(require('./tests/ExpoUIRNHostViewBounded'));
     modules.push(require('./tests/ExpoUIUniversalSize'));
     modules.push(require('./tests/AppMetrics'));
-    modules.push(require('./tests/Blob'));
     modules.push(require('./tests/FileSystem'));
     modules.push(require('./tests/Calendar'));
   }

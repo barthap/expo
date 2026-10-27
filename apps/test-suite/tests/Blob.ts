@@ -82,7 +82,8 @@ export async function test(
     // Passing Uint8Array for byte streams; non-byte streams will simply ignore it
     const read_promise = (reader as ReadableStreamBYOBReader).read(new Uint8Array(64));
     if (perform_gc) {
-      gc?.();
+      // `gc` is a Hermes global; browsers do not define it, so a bare `gc` reference would throw
+      globalThis.gc?.();
     }
     return read_promise;
   };
@@ -1426,7 +1427,7 @@ export async function test(
         let blob: Blob | null = new Blob([typed_arr]);
         const stream = blob.stream();
         blob = null;
-        gc?.();
+        globalThis.gc?.();
         const chunks = await read_all_chunks(stream, { perform_gc: true });
         expect(chunks).toEqual(input_arr);
       });
@@ -1436,7 +1437,7 @@ export async function test(
         const typed_arr = new Uint8Array(input_arr);
         const blob = new Blob([typed_arr]);
         const chunksPromise = read_all_chunks(blob.stream());
-        gc?.();
+        globalThis.gc?.();
         expect(await chunksPromise).toEqual(input_arr);
       });
 
@@ -1450,328 +1451,341 @@ export async function test(
       });
     });
 
-    describe('React Native blob store', () => {
-      // React Native's own Blob only holds a `{ blobId, offset, size }` handle; consumers such as
-      // FileReader resolve the bytes from the native blob store by id. These tests check that bytes
-      // registered from an expo Blob are what React Native reads back, and that releasing removes them.
-      const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;
+    // React Native's blob store, its URL.createObjectURL and its Image exist only on native.
+    if (Platform.OS !== 'web') {
+      describe('React Native blob store', () => {
+        // React Native's own Blob only holds a `{ blobId, offset, size }` handle; consumers such as
+        // FileReader resolve the bytes from the native blob store by id. These tests check that bytes
+        // registered from an expo Blob are what React Native reads back, and that releasing removes them.
+        const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;
 
-      const createReactNativeBlob = (blobId: string, blob: Blob) =>
-        BlobManager.createFromOptions({
-          blobId,
-          offset: 0,
-          size: blob.size,
-          type: blob.type,
-          lastModified: Date.now(),
-        });
+        const createReactNativeBlob = (blobId: string, blob: Blob) =>
+          BlobManager.createFromOptions({
+            blobId,
+            offset: 0,
+            size: blob.size,
+            type: blob.type,
+            lastModified: Date.now(),
+          });
 
-      const readWithFileReader = (
-        reactNativeBlob: unknown,
-        method: 'readAsArrayBuffer' | 'readAsText'
-      ): Promise<any> =>
-        new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.addEventListener('load', () => resolve(reader.result));
-          reader.addEventListener('error', () => reject(reader.error));
-          reader[method](reactNativeBlob as any);
-        });
-
-      it('React Native reads back the stored bytes', async () => {
-        const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13]), new Blob(['cd'])], {
-          type: 'application/octet-stream',
-        });
-        const blobId = storeBlobInReactNativeBlobStore(blob);
-        try {
-          const buffer = await readWithFileReader(
-            createReactNativeBlob(blobId, blob),
-            'readAsArrayBuffer'
-          );
-          expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
-        } finally {
-          releaseBlobFromReactNativeBlobStore(blobId);
-        }
-      });
-
-      it('React Native reads back the stored text', async () => {
-        const blob = new Blob(['hello, ', 'świecie 🌍'], { type: 'text/plain' });
-        const blobId = storeBlobInReactNativeBlobStore(blob);
-        try {
-          const text = await readWithFileReader(createReactNativeBlob(blobId, blob), 'readAsText');
-          expect(text).toEqual('hello, świecie 🌍');
-        } finally {
-          releaseBlobFromReactNativeBlobStore(blobId);
-        }
-      });
-
-      it('stored bytes outlive the source Blob', async () => {
-        let blob: Blob | null = new Blob(['still here']);
-        const size = blob.size;
-        const blobId = storeBlobInReactNativeBlobStore(blob);
-        blob = null;
-        gc?.();
-        try {
-          const text = await readWithFileReader(
-            BlobManager.createFromOptions({ blobId, offset: 0, size }),
-            'readAsText'
-          );
-          expect(text).toEqual('still here');
-        } finally {
-          releaseBlobFromReactNativeBlobStore(blobId);
-        }
-      });
-
-      it('released bytes can no longer be read', async () => {
-        const blob = new Blob(['gone']);
-        const blobId = storeBlobInReactNativeBlobStore(blob);
-        releaseBlobFromReactNativeBlobStore(blobId);
-
-        let error: any = null;
-        try {
-          await readWithFileReader(createReactNativeBlob(blobId, blob), 'readAsText');
-        } catch (e) {
-          error = e;
-        }
-        // React Native's FileReader rejects natively when the id is missing from the store and
-        // reports it as a NotReadableError.
-        expect(error).not.toBeNull();
-        expect(error.name).toEqual('NotReadableError');
-      });
-
-      it('releasing an unknown id does not throw', () => {
-        expect(() => releaseBlobFromReactNativeBlobStore('unknown-blob-id')).not.toThrow();
-      });
-    });
-
-    describe('URL.createObjectURL', () => {
-      // An object URL is how Blob bytes reach native consumers that only take a URI, such as
-      // `Image`. React Native serves the URL from its blob store, so these tests go through
-      // React Native's own consumers instead of reading the store back from JS.
-      const readWithXhr = (url: string): Promise<ArrayBuffer> =>
-        new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          // Android serves non-HTTP URIs to XHR only for the 'blob' response type.
-          xhr.responseType = 'blob';
-          xhr.onload = () => {
+        const readWithFileReader = (
+          reactNativeBlob: unknown,
+          method: 'readAsArrayBuffer' | 'readAsText'
+        ): Promise<any> =>
+          new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.addEventListener('load', () => resolve(reader.result as ArrayBuffer));
+            reader.addEventListener('load', () => resolve(reader.result));
             reader.addEventListener('error', () => reject(reader.error));
-            reader.readAsArrayBuffer(xhr.response);
-          };
-          xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
-          xhr.open('GET', url);
-          xhr.send();
-        });
+            reader[method](reactNativeBlob as any);
+          });
 
-      // Settles with whichever of `onLoad` / `onError` the Image emits first.
-      const loadImage = (uri: string): Promise<{ loaded: boolean; nativeEvent: any }> =>
-        new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error(`Image did not settle: ${uri}`)), 5000);
-          const settle = (loaded: boolean) => (event: any) => {
-            clearTimeout(timeout);
-            resolve({ loaded, nativeEvent: event.nativeEvent });
-          };
-          setPortalChild(
-            React.createElement(Image, {
-              source: { uri },
-              style: { width: 10, height: 10 },
-              onLoad: settle(true),
-              onError: settle(false),
-            })
-          );
-        });
-
-      afterEach(async () => {
-        await cleanupPortal();
-      });
-
-      it('loads an image from an Expo Blob', async () => {
-        const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
-        try {
-          const { loaded, nativeEvent } = await loadImage(url);
-          expect(loaded).toBe(true);
-          expect(nativeEvent.source.width).toBe(1);
-          expect(nativeEvent.source.height).toBe(1);
-        } finally {
-          URL.revokeObjectURL(url);
-        }
-      });
-
-      it('serves the Blob bytes to XMLHttpRequest', async () => {
-        const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13])]);
-        const url = URL.createObjectURL(blob);
-        try {
-          const buffer = await readWithXhr(url);
-          expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
-        } finally {
-          URL.revokeObjectURL(url);
-        }
-      });
-
-      it('serves a File', async () => {
-        const url = URL.createObjectURL(new File(['file contents'], 'a.txt'));
-        try {
-          const buffer = await readWithXhr(url);
-          expect(new TextDecoder().decode(buffer)).toEqual('file contents');
-        } finally {
-          URL.revokeObjectURL(url);
-        }
-      });
-
-      it('stops serving the bytes after revokeObjectURL', async () => {
-        // The URL is revoked before its first load, so no image cache can hide the result.
-        const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
-        // A malformed URL would also fail to load, so check that this one is a real blob URL.
-        expect(url).toMatch(/^(blob:|content:)/);
-        URL.revokeObjectURL(url);
-
-        const { loaded } = await loadImage(url);
-        expect(loaded).toBe(false);
-
-        let xhrError: any = null;
-        try {
-          await readWithXhr(url);
-        } catch (e) {
-          xhrError = e;
-        }
-        expect(xhrError).not.toBeNull();
-      });
-    });
-
-    describe('React Native Blob as a constructor part', () => {
-      // React Native's XHR returns its own Blob, whose bytes live in React Native's blob store.
-      // The constructor copies them out, so the new Blob must not depend on that Blob afterwards.
-      // The source bytes come from a `blob:` URL of an Expo Blob, which keeps the tests offline.
-      const fetchReactNativeBlob = (url: string): Promise<any> =>
-        new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.responseType = 'blob';
-          xhr.onload = () => resolve(xhr.response);
-          xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
-          xhr.open('GET', url);
-          xhr.send();
-        });
-
-      const SOURCE_BYTES = [104, 101, 108, 108, 111, 0, 255, 128];
-
-      // Calls `test` with a React Native Blob holding SOURCE_BYTES and cleans up both stores after.
-      const withReactNativeBlob = async (test: (rnBlob: any) => Promise<void>) => {
-        const url = URL.createObjectURL(new Blob([new Uint8Array(SOURCE_BYTES)]));
-        let rnBlob: any = null;
-        try {
-          rnBlob = await fetchReactNativeBlob(url);
-          await test(rnBlob);
-        } finally {
-          URL.revokeObjectURL(url);
-          // Releases the XHR's own store entry; a second close() would throw
-          if (rnBlob?._data) {
-            rnBlob.close();
+        it('React Native reads back the stored bytes', async () => {
+          const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13]), new Blob(['cd'])], {
+            type: 'application/octet-stream',
+          });
+          const blobId = storeBlobInReactNativeBlobStore(blob);
+          try {
+            const buffer = await readWithFileReader(
+              createReactNativeBlob(blobId, blob),
+              'readAsArrayBuffer'
+            );
+            expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
+          } finally {
+            releaseBlobFromReactNativeBlobStore(blobId);
           }
-        }
-      };
-
-      it('copies the bytes of a React Native Blob', async () => {
-        await withReactNativeBlob(async (rnBlob) => {
-          // Guard: the part must really be React Native's Blob, not an Expo Blob
-          expect(typeof rnBlob.data.blobId).toBe('string');
-          expect(typeof rnBlob.arrayBuffer).not.toBe('function');
-
-          const blob = new Blob([rnBlob]);
-
-          expect(blob.size).toBe(SOURCE_BYTES.length);
-          expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
         });
-      });
 
-      it('mixes a React Native Blob slice with other parts', async () => {
-        await withReactNativeBlob(async (rnBlob) => {
-          // A slice shares the blobId and differs in offset and size
-          const blob = new Blob(['x', rnBlob.slice(1, 3), new Uint8Array([1])]);
-
-          expect(Array.from(await blob.bytes())).toEqual([120, 101, 108, 1]);
+        it('React Native reads back the stored text', async () => {
+          const blob = new Blob(['hello, ', 'świecie 🌍'], { type: 'text/plain' });
+          const blobId = storeBlobInReactNativeBlobStore(blob);
+          try {
+            const text = await readWithFileReader(
+              createReactNativeBlob(blobId, blob),
+              'readAsText'
+            );
+            expect(text).toEqual('hello, świecie 🌍');
+          } finally {
+            releaseBlobFromReactNativeBlobStore(blobId);
+          }
         });
-      });
 
-      it('keeps its bytes after the React Native Blob is closed', async () => {
-        await withReactNativeBlob(async (rnBlob) => {
-          const blob = new Blob([rnBlob]);
-
-          rnBlob.close();
-
-          expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
-          expect(Array.from(await blob.slice(5).bytes())).toEqual([0, 255, 128]);
+        it('stored bytes outlive the source Blob', async () => {
+          let blob: Blob | null = new Blob(['still here']);
+          const size = blob.size;
+          const blobId = storeBlobInReactNativeBlobStore(blob);
+          blob = null;
+          globalThis.gc?.();
+          try {
+            const text = await readWithFileReader(
+              BlobManager.createFromOptions({ blobId, offset: 0, size }),
+              'readAsText'
+            );
+            expect(text).toEqual('still here');
+          } finally {
+            releaseBlobFromReactNativeBlobStore(blobId);
+          }
         });
-      });
 
-      it('throws a TypeError for a closed React Native Blob', async () => {
-        await withReactNativeBlob(async (rnBlob) => {
-          rnBlob.close();
+        it('released bytes can no longer be read', async () => {
+          const blob = new Blob(['gone']);
+          const blobId = storeBlobInReactNativeBlobStore(blob);
+          releaseBlobFromReactNativeBlobStore(blobId);
 
           let error: any = null;
           try {
-            new Blob([rnBlob]);
+            await readWithFileReader(createReactNativeBlob(blobId, blob), 'readAsText');
           } catch (e) {
             error = e;
           }
-          expect(error instanceof TypeError).toBe(true);
-          expect(error.message).toMatch(/closed React Native Blob/);
+          // React Native's FileReader rejects natively when the id is missing from the store and
+          // reports it as a NotReadableError.
+          expect(error).not.toBeNull();
+          expect(error.name).toEqual('NotReadableError');
+        });
+
+        it('releasing an unknown id does not throw', () => {
+          expect(() => releaseBlobFromReactNativeBlobStore('unknown-blob-id')).not.toThrow();
         });
       });
 
-      // Same shape as React Native's Blob (`react-native/Libraries/Blob/Blob.js`), but pointing at
-      // any handle. The native side must report a bad handle as an error instead of crashing
-      // (iOS `subdataWithRange:`) or padding with zeros (Android `copyOfRange`).
-      const createReactNativeBlobHandle = (data: {
-        blobId: string;
-        offset: number;
-        size: number;
-      }) => ({
-        _data: data as typeof data | null,
-        get data() {
-          if (!this._data) {
-            throw new Error('Blob has been closed and is no longer available');
+      describe('URL.createObjectURL', () => {
+        // An object URL is how Blob bytes reach native consumers that only take a URI, such as
+        // `Image`. React Native serves the URL from its blob store, so these tests go through
+        // React Native's own consumers instead of reading the store back from JS.
+        const readWithXhr = (url: string): Promise<ArrayBuffer> =>
+          new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            // Android serves non-HTTP URIs to XHR only for the 'blob' response type.
+            xhr.responseType = 'blob';
+            xhr.onload = () => {
+              const reader = new FileReader();
+              reader.addEventListener('load', () => resolve(reader.result as ArrayBuffer));
+              reader.addEventListener('error', () => reject(reader.error));
+              reader.readAsArrayBuffer(xhr.response);
+            };
+            xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
+            xhr.open('GET', url);
+            xhr.send();
+          });
+
+        // Settles with whichever of `onLoad` / `onError` the Image emits first.
+        const loadImage = (uri: string): Promise<{ loaded: boolean; nativeEvent: any }> =>
+          new Promise((resolve, reject) => {
+            const timeout = setTimeout(
+              () => reject(new Error(`Image did not settle: ${uri}`)),
+              5000
+            );
+            const settle = (loaded: boolean) => (event: any) => {
+              clearTimeout(timeout);
+              resolve({ loaded, nativeEvent: event.nativeEvent });
+            };
+            setPortalChild(
+              React.createElement(Image, {
+                source: { uri },
+                style: { width: 10, height: 10 },
+                onLoad: settle(true),
+                onError: settle(false),
+              })
+            );
+          });
+
+        afterEach(async () => {
+          await cleanupPortal();
+        });
+
+        it('loads an image from an Expo Blob', async () => {
+          const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
+          try {
+            const { loaded, nativeEvent } = await loadImage(url);
+            expect(loaded).toBe(true);
+            expect(nativeEvent.source.width).toBe(1);
+            expect(nativeEvent.source.height).toBe(1);
+          } finally {
+            URL.revokeObjectURL(url);
           }
-          return this._data;
-        },
-        get size(): number {
-          return this.data.size;
-        },
-        slice() {},
-        close() {
-          this._data = null;
-        },
+        });
+
+        it('serves the Blob bytes to XMLHttpRequest', async () => {
+          const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13])]);
+          const url = URL.createObjectURL(blob);
+          try {
+            const buffer = await readWithXhr(url);
+            expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        it('serves a File', async () => {
+          const url = URL.createObjectURL(new File(['file contents'], 'a.txt'));
+          try {
+            const buffer = await readWithXhr(url);
+            expect(new TextDecoder().decode(buffer)).toEqual('file contents');
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        it('stops serving the bytes after revokeObjectURL', async () => {
+          // The URL is revoked before its first load, so no image cache can hide the result.
+          const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
+          // A malformed URL would also fail to load, so check that this one is a real blob URL.
+          expect(url).toMatch(/^(blob:|content:)/);
+          URL.revokeObjectURL(url);
+
+          const { loaded } = await loadImage(url);
+          expect(loaded).toBe(false);
+
+          let xhrError: any = null;
+          try {
+            await readWithXhr(url);
+          } catch (e) {
+            xhrError = e;
+          }
+          expect(xhrError).not.toBeNull();
+        });
       });
 
-      const constructionError = (part: any): any => {
-        try {
-          new Blob([part]);
-        } catch (e) {
-          return e;
-        }
-        return null;
-      };
+      describe('React Native Blob as a constructor part', () => {
+        // React Native's XHR returns its own Blob, whose bytes live in React Native's blob store.
+        // The constructor copies them out, so the new Blob must not depend on that Blob afterwards.
+        // The source bytes come from a `blob:` URL of an Expo Blob, which keeps the tests offline.
+        const fetchReactNativeBlob = (url: string): Promise<any> =>
+          new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.responseType = 'blob';
+            xhr.onload = () => resolve(xhr.response);
+            xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
+            xhr.open('GET', url);
+            xhr.send();
+          });
 
-      it('throws for a React Native Blob missing from the store', () => {
-        const handle = createReactNativeBlobHandle({ blobId: 'no-such-blob', offset: 0, size: 1 });
+        const SOURCE_BYTES = [104, 101, 108, 108, 111, 0, 255, 128];
 
-        const error = constructionError(handle);
+        // Calls `test` with a React Native Blob holding SOURCE_BYTES and cleans up both stores after.
+        const withReactNativeBlob = async (test: (rnBlob: any) => Promise<void>) => {
+          const url = URL.createObjectURL(new Blob([new Uint8Array(SOURCE_BYTES)]));
+          let rnBlob: any = null;
+          try {
+            rnBlob = await fetchReactNativeBlob(url);
+            await test(rnBlob);
+          } finally {
+            URL.revokeObjectURL(url);
+            // Releases the XHR's own store entry; a second close() would throw
+            if (rnBlob?._data) {
+              rnBlob.close();
+            }
+          }
+        };
 
-        expect(error instanceof Error).toBe(true);
-        expect(error.message).toMatch(/no-such-blob.*React Native blob store/);
-      });
+        it('copies the bytes of a React Native Blob', async () => {
+          await withReactNativeBlob(async (rnBlob) => {
+            // Guard: the part must really be React Native's Blob, not an Expo Blob
+            expect(typeof rnBlob.data.blobId).toBe('string');
+            expect(typeof rnBlob.arrayBuffer).not.toBe('function');
 
-      it('throws for a React Native Blob range past the end of its bytes', () => {
-        const blobId = storeBlobInReactNativeBlobStore(new Blob([new Uint8Array([1, 2, 3, 4])]));
-        try {
-          const handle = createReactNativeBlobHandle({ blobId, offset: 2, size: 10 });
+            const blob = new Blob([rnBlob]);
+
+            expect(blob.size).toBe(SOURCE_BYTES.length);
+            expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
+          });
+        });
+
+        it('mixes a React Native Blob slice with other parts', async () => {
+          await withReactNativeBlob(async (rnBlob) => {
+            // A slice shares the blobId and differs in offset and size
+            const blob = new Blob(['x', rnBlob.slice(1, 3), new Uint8Array([1])]);
+
+            expect(Array.from(await blob.bytes())).toEqual([120, 101, 108, 1]);
+          });
+        });
+
+        it('keeps its bytes after the React Native Blob is closed', async () => {
+          await withReactNativeBlob(async (rnBlob) => {
+            const blob = new Blob([rnBlob]);
+
+            rnBlob.close();
+
+            expect(Array.from(await blob.bytes())).toEqual(SOURCE_BYTES);
+            expect(Array.from(await blob.slice(5).bytes())).toEqual([0, 255, 128]);
+          });
+        });
+
+        it('throws a TypeError for a closed React Native Blob', async () => {
+          await withReactNativeBlob(async (rnBlob) => {
+            rnBlob.close();
+
+            let error: any = null;
+            try {
+              new Blob([rnBlob]);
+            } catch (e) {
+              error = e;
+            }
+            expect(error instanceof TypeError).toBe(true);
+            expect(error.message).toMatch(/closed React Native Blob/);
+          });
+        });
+
+        // Same shape as React Native's Blob (`react-native/Libraries/Blob/Blob.js`), but pointing at
+        // any handle. The native side must report a bad handle as an error instead of crashing
+        // (iOS `subdataWithRange:`) or padding with zeros (Android `copyOfRange`).
+        const createReactNativeBlobHandle = (data: {
+          blobId: string;
+          offset: number;
+          size: number;
+        }) => ({
+          _data: data as typeof data | null,
+          get data() {
+            if (!this._data) {
+              throw new Error('Blob has been closed and is no longer available');
+            }
+            return this._data;
+          },
+          get size(): number {
+            return this.data.size;
+          },
+          slice() {},
+          close() {
+            this._data = null;
+          },
+        });
+
+        const constructionError = (part: any): any => {
+          try {
+            new Blob([part]);
+          } catch (e) {
+            return e;
+          }
+          return null;
+        };
+
+        it('throws for a React Native Blob missing from the store', () => {
+          const handle = createReactNativeBlobHandle({
+            blobId: 'no-such-blob',
+            offset: 0,
+            size: 1,
+          });
 
           const error = constructionError(handle);
 
           expect(error instanceof Error).toBe(true);
-          expect(error.message).toMatch(/range of the React Native Blob.*outside of its bytes/);
-        } finally {
-          releaseBlobFromReactNativeBlobStore(blobId);
-        }
+          expect(error.message).toMatch(/no-such-blob.*React Native blob store/);
+        });
+
+        it('throws for a React Native Blob range past the end of its bytes', () => {
+          const blobId = storeBlobInReactNativeBlobStore(new Blob([new Uint8Array([1, 2, 3, 4])]));
+          try {
+            const handle = createReactNativeBlobHandle({ blobId, offset: 2, size: 10 });
+
+            const error = constructionError(handle);
+
+            expect(error instanceof Error).toBe(true);
+            expect(error.message).toMatch(/range of the React Native Blob.*outside of its bytes/);
+          } finally {
+            releaseBlobFromReactNativeBlobStore(blobId);
+          }
+        });
       });
-    });
+    }
   });
 }
