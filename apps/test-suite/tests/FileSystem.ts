@@ -3,6 +3,11 @@ import { Asset } from 'expo-asset';
 import Constants from 'expo-constants';
 import { File, Directory, Paths, FileMode, type FileDigestAlgorithm } from 'expo-file-system';
 import * as FS from 'expo-file-system/legacy';
+import {
+  Blob as ExpoBlob,
+  releaseBlobFromReactNativeBlobStore,
+  storeBlobInReactNativeBlobStore,
+} from 'expo/blob';
 import { fetch } from 'expo/fetch';
 import { Platform } from 'react-native';
 
@@ -2117,6 +2122,179 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
 
         expect(result.exists).toBe(false);
       });
+    });
+    // On web, `slice()` returns a browser Blob with a copy of the bytes, and there is no storage
+    // to write the files to, so these specs run only on Android and iOS.
+    describeWithStorage('File.slice() and file-backed Blobs', () => {
+      const CHUNK = 64 * 1024;
+
+      function makeFile(name: string, content: string | Uint8Array): File {
+        const file = new File(testDirectory, name);
+        file.writeSync(content);
+        return file;
+      }
+
+      async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> {
+        const chunks: Uint8Array[] = [];
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) return chunks;
+          chunks.push(value);
+        }
+      }
+
+      it('returns an expo Blob that reads the requested range', async () => {
+        const file = makeFile('range.txt', 'abcdefghij');
+        const slice = file.slice(2, 7, 'text/plain');
+        expect(Object.prototype.isPrototypeOf.call(ExpoBlob.prototype, slice)).toBe(true);
+        expect(slice.size).toBe(5);
+        expect(slice.type).toBe('text/plain');
+        expect(await slice.text()).toBe('cdefg');
+      });
+
+      it('keeps the size fixed when the file is appended to or truncated', async () => {
+        const file = makeFile('size-fixed.txt', 'abcdefghij');
+        const slice = file.slice(4, 8);
+        file.writeSync('XYZ', { append: true });
+        expect(slice.size).toBe(4);
+        expect(await slice.text()).toBe('efgh');
+        // A shorter file gives a short read: the Blob has no snapshot of the old bytes
+        file.writeSync('abcdef');
+        expect(slice.size).toBe(4);
+        expect(await slice.text()).toBe('ef');
+        expect((await slice.bytes()).length).toBe(2);
+      });
+
+      it('reads nothing past the end of the file', async () => {
+        const file = makeFile('eof.txt', 'abcdefghij');
+        const slice = file.slice(6, 10);
+        file.writeSync('abc');
+        expect(await slice.text()).toBe('');
+      });
+
+      it('rejects reads after the file was deleted', async () => {
+        const file = makeFile('deleted.txt', 'abcdefghij');
+        const slice = file.slice(0, 4);
+        file.delete();
+        let error: unknown = null;
+        try {
+          await slice.text();
+        } catch (e) {
+          error = e;
+        }
+        expect(error).not.toBeNull();
+        expect(String(error)).toMatch(/file-backed Blob part/);
+      });
+
+      it('throws when slicing a file that does not exist', () => {
+        const file = new File(testDirectory, 'missing.txt');
+        expect(() => file.slice(0, 1)).toThrowError(
+          /does not exist or the app has no read permission/
+        );
+      });
+
+      it('composes nested slices without reading the file', async () => {
+        const file = makeFile('nested.txt', '0123456789');
+        const nested = file.slice(1, 9).slice(1, 7).slice(1, 5).slice(1, 3);
+        file.writeSync('abcdefghij');
+        // Bytes 4 and 5 of the file, read after the rewrite
+        expect(nested.size).toBe(2);
+        expect(await nested.text()).toBe('ef');
+      });
+
+      it('mixes slices with in-memory parts in new Blob([...])', async () => {
+        const file = makeFile('mixed.txt', 'abcdefghij');
+        const blob = new ExpoBlob(['x', file.slice(2, 5), new Uint8Array([33, 34])]);
+        expect(blob.size).toBe(6);
+        expect(await blob.text()).toBe('xcde!"');
+        expect(await blob.slice(2, 5).text()).toBe('de!');
+      });
+
+      it('takes a whole File as a part of new Blob([...])', async () => {
+        const file = makeFile('whole.txt', 'hello');
+        const blob = new ExpoBlob([file, '!']);
+        file.writeSync('HELLO');
+        expect(blob.size).toBe(6);
+        expect(await blob.text()).toBe('HELLO!');
+      });
+
+      it('streams a large range in chunks of at most 64 KiB', async () => {
+        const size = 16 * CHUNK + 100;
+        const content = new Uint8Array(size).map((_, i) => (i * 7) % 256);
+        const file = makeFile('large.bin', content);
+        const slice = file.slice(10);
+        const chunks = await readAll(slice.stream());
+        // The chunk sizes show that each pull reads a bounded range instead of the whole slice
+        expect(chunks.length).toBe(Math.ceil((size - 10) / CHUNK));
+        expect(chunks.every((chunk) => chunk.length <= CHUNK)).toBe(true);
+        const joined = new Uint8Array(size - 10);
+        let offset = 0;
+        for (const chunk of chunks) {
+          joined.set(chunk, offset);
+          offset += chunk.length;
+        }
+        expect(offset).toBe(size - 10);
+        expect(joined.every((byte, i) => byte === content[i + 10])).toBe(true);
+      });
+
+      it('ends the stream early when the file got shorter', async () => {
+        const file = makeFile('stream-truncated.bin', new Uint8Array(3 * CHUNK));
+        const slice = file.slice();
+        file.writeSync(new Uint8Array(CHUNK + 5));
+        const chunks = await readAll(slice.stream());
+        expect(chunks.map((chunk) => chunk.length)).toEqual([CHUNK, 5]);
+      });
+
+      it('stores a file-backed Blob in the React Native blob store', async () => {
+        const file = makeFile('store.txt', 'stored bytes');
+        // `File.slice()` is declared to return the DOM `Blob` type; the object is an expo Blob
+        const slice = file.slice(0, 6) as ExpoBlob;
+        const blobId = storeBlobInReactNativeBlobStore(slice);
+        try {
+          // React Native reads the stored copy back by id, as its FileReader and fetch() do
+          const BlobManager = require('react-native/Libraries/Blob/BlobManager').default;
+          const reactNativeBlob = BlobManager.createFromOptions({
+            blobId,
+            offset: 0,
+            size: slice.size,
+            type: '',
+            lastModified: Date.now(),
+          });
+          const text = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.addEventListener('load', () => resolve(reader.result as string));
+            reader.addEventListener('error', () => reject(reader.error));
+            reader.readAsText(reactNativeBlob);
+          });
+          expect(text).toBe('stored');
+        } finally {
+          releaseBlobFromReactNativeBlobStore(blobId);
+        }
+        file.delete();
+        expect(() => storeBlobInReactNativeBlobStore(slice)).toThrow();
+      });
+
+      httpbingo.it('uploads a slice in FormData', async () => {
+        const file = makeFile('upload.txt', 'hello slice world');
+        const form = new FormData();
+        form.append('file', file.slice(6, 11, 'text/plain') as any, 'part.txt');
+        const response = await fetch('https://httpbingo.org/post', { method: 'POST', body: form });
+        const json = await response.json();
+        expect(JSON.stringify(json.files)).toContain('slice');
+        expect(JSON.stringify(json.files)).not.toContain('hello');
+      });
+
+      if (Platform.OS === 'android') {
+        it('reads a slice of a content:// URI', async () => {
+          const file = makeFile('content-uri.txt', 'abcdefghij');
+          const contentFile = new File(file.contentUri);
+          const slice = contentFile.slice(3, 6);
+          expect(slice.size).toBe(3);
+          expect(await slice.text()).toBe('def');
+          expect(await new ExpoBlob([contentFile]).text()).toBe('abcdefghij');
+        });
+      }
     });
     addAppleAppGroupsTestSuiteAsync({ describe, expect, it, ...t });
   });
