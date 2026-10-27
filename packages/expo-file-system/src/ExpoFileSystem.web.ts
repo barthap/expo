@@ -44,8 +44,50 @@ function unsupportedDirectoryMember(member: string): UnavailabilityError {
 function uriBackedError(member: string, uri: string): UnavailabilityError {
   return unavailable(
     `File.${member}`,
-    `The file at "${uri}" only has a URI and its data is not loaded. Use \`File.fromWebFile()\` with a browser \`File\`, or \`fetch()\` the URI directly.`
+    `The file at "${uri}" only has a URI, so its data is read with \`fetch()\` and is not available synchronously. Read it first and build a browser \`File\`: \`new globalThis.File([await file.bytes()], file.name, { type: file.type })\`.`
   );
+}
+
+// Scheme names are case-insensitive, so `DATA:,hi` is a `data:` uri too.
+function hasScheme(uri: string, scheme: string): boolean {
+  return uri.slice(0, scheme.length + 1).toLowerCase() === `${scheme}:`;
+}
+
+// Returns a MIME type the way `Blob.type` holds it, with its parameters, for example
+// `text/plain;charset=utf-8`. Returns `''` when there is none.
+function normalizeType(type: string | null): string {
+  return (type ?? '').trim().toLowerCase();
+}
+
+// Returns the MIME type written in a `data:` uri, without the `;base64` marker, or `''` when the
+// uri has none.
+function dataUriType(uri: string): string {
+  const commaIndex = uri.indexOf(',');
+  const type = normalizeType(
+    uri
+      .slice('data:'.length, commaIndex === -1 ? undefined : commaIndex)
+      .replace(/;\s*base64\s*$/i, '')
+  );
+  return type.startsWith(';') ? '' : type;
+}
+
+async function fetchUri(uri: string, signal?: AbortSignal): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(uri, { signal });
+  } catch (error) {
+    throw new Error(`Failed to read the file at "${uri}": ${(error as Error)?.message ?? error}`, {
+      cause: error,
+    });
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(
+      `Failed to read the file at "${uri}": the server responded with status ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+      { cause: response }
+    );
+  }
+  return response;
 }
 
 function registerBlob(blob: Blob, name: string): string {
@@ -67,6 +109,8 @@ function superArgsFor(uri: string): ConstructorParameters<typeof globalThis.File
 class FileSystemFile extends globalThis.File {
   readonly #uri: string;
   readonly #isSnapshot: boolean;
+  // The MIME type of the last successful read of a uri-backed `http(s):` or foreign `blob:` file.
+  #fetchedType: string | null = null;
 
   static fromWebFile(webFile: globalThis.File): FileSystemFile {
     return new this(registerBlob(webFile, webFile.name));
@@ -85,7 +129,27 @@ class FileSystemFile extends globalThis.File {
   validatePath(): void {}
 
   get exists(): boolean {
-    return blobRegistry.has(this.#uri) || this.#uri.startsWith('data:');
+    return blobRegistry.has(this.#uri) || hasScheme(this.#uri, 'data');
+  }
+
+  // A snapshot keeps the type of its data. A `data:` uri names its MIME type. Other uri-backed files
+  // learn it from the `Content-Type` of the last successful read.
+  get type(): string {
+    if (this.#isSnapshot) {
+      return super.type;
+    }
+    if (hasScheme(this.#uri, 'data')) {
+      return dataUriType(this.#uri);
+    }
+    return this.#fetchedType ?? '';
+  }
+
+  async #fetch(signal?: AbortSignal): Promise<Response> {
+    const response = await fetchUri(this.#uri, signal);
+    if (!hasScheme(this.#uri, 'data')) {
+      this.#fetchedType = normalizeType(response.headers.get('content-type'));
+    }
+    return response;
   }
 
   // A uri-backed file has empty internal data, so it throws instead of reporting size 0.
@@ -102,16 +166,16 @@ class FileSystemFile extends globalThis.File {
     return this.#isSnapshot ? super.lastModified : null;
   }
 
-  text(): Promise<string> {
+  async text(): Promise<string> {
     if (!this.#isSnapshot) {
-      return Promise.reject(uriBackedError('text', this.#uri));
+      return (await this.#fetch()).text();
     }
     return super.text();
   }
 
   async bytes(): Promise<Uint8Array<ArrayBuffer>> {
     if (!this.#isSnapshot) {
-      throw uriBackedError('bytes', this.#uri);
+      return new Uint8Array(await (await this.#fetch()).arrayBuffer());
     }
     // `Blob.prototype.bytes` is missing in older browsers.
     if (typeof super.bytes === 'function') {
@@ -120,25 +184,52 @@ class FileSystemFile extends globalThis.File {
     return new Uint8Array(await super.arrayBuffer());
   }
 
-  arrayBuffer(): Promise<ArrayBuffer> {
+  async arrayBuffer(): Promise<ArrayBuffer> {
     if (!this.#isSnapshot) {
-      return Promise.reject(uriBackedError('arrayBuffer', this.#uri));
+      return (await this.#fetch()).arrayBuffer();
     }
     return super.arrayBuffer();
   }
 
   stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
     if (!this.#isSnapshot) {
-      throw uriBackedError('stream', this.#uri);
+      return this.#fetchStream();
     }
     return super.stream();
   }
 
   readableStream(): ReadableStream<Uint8Array<ArrayBuffer>> {
-    if (!this.#isSnapshot) {
-      throw uriBackedError('readableStream', this.#uri);
-    }
-    return super.stream();
+    return this.stream();
+  }
+
+  // `stream()` is synchronous, so the stream starts the fetch when it is first read. A high-water
+  // mark of 0 stops the stream from pulling (and fetching) before anyone reads from it. Cancelling
+  // before the response arrives aborts the fetch; after that it cancels the response body.
+  #fetchStream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+    const abort = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | null = null;
+    return new ReadableStream<Uint8Array<ArrayBuffer>>(
+      {
+        pull: async (controller) => {
+          if (!reader) {
+            const { body } = await this.#fetch(abort.signal);
+            if (!body) {
+              controller.close();
+              return;
+            }
+            reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>;
+          }
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+          } else {
+            controller.enqueue(value);
+          }
+        },
+        cancel: (reason) => (reader ? reader.cancel(reason) : abort.abort(reason)),
+      },
+      { highWaterMark: 0 }
+    );
   }
 
   slice(start?: number, end?: number, contentType?: string): Blob {

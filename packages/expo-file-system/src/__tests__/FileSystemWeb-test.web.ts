@@ -117,6 +117,12 @@ describe('File on web, uri-backed', () => {
     expect(new File(Paths.document, 'a.txt').exists).toBe(false);
   });
 
+  it('treats the scheme case-insensitively, like the browser fetch does', () => {
+    const file = new File('DATA:,hi');
+    expect(file.exists).toBe(true);
+    expect(file.type).toBe('');
+  });
+
   it('takes the name and extension from the uri', () => {
     const file = new File('https://example.com/dir/photo.png');
     expect(file.name).toBe('photo.png');
@@ -124,26 +130,239 @@ describe('File on web, uri-backed', () => {
     expect(new File(Paths.cache, 'a.txt').uri).toBe('file:///cache/a.txt');
   });
 
-  it('throws for size, slice, and stream instead of reporting empty data', () => {
+  it('throws for size, slice, and toWebFile instead of reporting empty data', () => {
     const file = new File('https://example.com/photo.png');
     expect(() => file.size).toThrow(ERR_UNAVAILABLE);
     expect(() => file.slice(0, 1)).toThrow(ERR_UNAVAILABLE);
-    expect(() => file.stream()).toThrow(ERR_UNAVAILABLE);
     expect(() => file.toWebFile()).toThrow(ERR_UNAVAILABLE);
+    expect(() => file.toWebFile()).toThrow(/new globalThis\.File\(\[await file\.bytes\(\)\]/);
     expect(file.lastModified).toBeNull();
-  });
-
-  it('rejects reads, because the data is not loaded', async () => {
-    const file = new File('https://example.com/photo.png');
-    await expect(file.text()).rejects.toEqual(ERR_UNAVAILABLE);
-    await expect(file.bytes()).rejects.toEqual(ERR_UNAVAILABLE);
-    await expect(file.arrayBuffer()).rejects.toEqual(ERR_UNAVAILABLE);
   });
 
   it('delete() does nothing for a uri it did not register', () => {
     const file = new File('https://example.com/photo.png');
     expect(() => file.delete()).not.toThrow();
     expect(file.exists).toBe(false);
+  });
+});
+
+describe('File on web, uri-backed reads', () => {
+  let fetchMock: jest.SpyInstance<ReturnType<typeof fetch>, Parameters<typeof fetch>>;
+
+  beforeEach(() => {
+    fetchMock = jest.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchMock.mockRestore();
+  });
+
+  function respondWith(body: string, headers: Record<string, string> = {}) {
+    fetchMock.mockImplementation(async () => new Response(body, { headers }));
+  }
+
+  const uris = {
+    'data:': 'data:application/json,{"a":1}',
+    'http:': 'http://example.com/data.json',
+    'foreign blob:': 'blob:http://example.com/0b6e5a3c-unknown',
+  };
+
+  describe.each(Object.entries(uris))('%s uri', (_, uri) => {
+    beforeEach(() => respondWith('{"a":1}', { 'Content-Type': 'application/json' }));
+
+    it('reads the data that fetch(uri) returns with every read method', async () => {
+      const file = new File(uri);
+      expect(await file.text()).toBe('{"a":1}');
+      expect(await file.json()).toEqual({ a: 1 });
+      const bytes = await file.bytes();
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      expect(Array.from(bytes)).toEqual(Array.from(Buffer.from('{"a":1}')));
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(
+        new Uint8Array(Buffer.from('{"a":1}'))
+      );
+      expect(await readStream(file.stream())).toBe('{"a":1}');
+      expect(await readStream(file.readableStream())).toBe('{"a":1}');
+      for (const [calledUri] of fetchMock.mock.calls) {
+        expect(calledUri).toBe(uri);
+      }
+      // One fetch per read; nothing is cached except the type.
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+    });
+
+    it('keeps throwing for size and slice after a read, because reads do not keep the data', async () => {
+      const file = new File(uri);
+      await file.text();
+      expect(() => file.size).toThrow(ERR_UNAVAILABLE);
+      expect(() => file.slice(0, 1)).toThrow(ERR_UNAVAILABLE);
+      expect(file.lastModified).toBeNull();
+    });
+  });
+
+  it('stream() does not fetch until the stream is read', async () => {
+    respondWith('lazy');
+    const stream = new File('https://example.com/a.txt').stream();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const reader = stream.getReader();
+    const { value } = await reader.read();
+    expect(Buffer.from(value!).toString('utf8')).toBe('lazy');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it('stream().cancel() aborts a fetch that has not answered yet, so the request does not stay open', async () => {
+    let signal: AbortSignal | undefined;
+    fetchMock.mockImplementation((_, init) => {
+      signal = init?.signal ?? undefined;
+      return new Promise(() => {});
+    });
+    const reader = new File('https://example.com/slow').stream().getReader();
+    reader.read().catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await reader.cancel();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('stream().cancel() cancels the response body after the first chunk', async () => {
+    const bodyCancel = jest.fn();
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull: (controller) => controller.enqueue(new TextEncoder().encode('chunk')),
+            cancel: bodyCancel,
+          })
+        )
+    );
+    const reader = new File('https://example.com/endless').stream().getReader();
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel('done');
+    expect(bodyCancel).toHaveBeenCalled();
+  });
+
+  it('decodes a data: uri for real, without a fetch mock', async () => {
+    fetchMock.mockRestore();
+    const file = new File('data:text/plain;base64,aGVsbG8=');
+    expect(await file.text()).toBe('hello');
+  });
+
+  describe('type', () => {
+    it('comes from the MIME type of a data: uri, with its parameters like Blob.type', () => {
+      expect(new File('data:text/plain;charset=utf-8;base64,aGk=').type).toBe(
+        'text/plain;charset=utf-8'
+      );
+      expect(new File('data:Image/PNG;base64,aGk=').type).toBe('image/png');
+      expect(new File('data:,hi').type).toBe('');
+      expect(new File('data:;base64,aGk=').type).toBe('');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('does not change for a data: uri after a read', async () => {
+      // Browsers answer `data:,hi` with `text/plain;charset=US-ASCII`; the uri names no type.
+      respondWith('hi', { 'Content-Type': 'text/plain;charset=US-ASCII' });
+      const file = new File('data:,hi');
+      await file.text();
+      expect(file.type).toBe('');
+    });
+
+    it.each([
+      ['http:', 'https://example.com/photo'],
+      ['foreign blob:', 'blob:http://example.com/0b6e5a3c-unknown'],
+    ])('is empty for a %s uri until a read returns a Content-Type', async (_, uri) => {
+      respondWith('<html></html>', { 'Content-Type': 'Text/HTML; charset=utf-8' });
+      const file = new File(uri);
+      expect(file.type).toBe('');
+      await file.text();
+      expect(file.type).toBe('text/html; charset=utf-8');
+    });
+
+    it('follows the Content-Type of every successful read', async () => {
+      const file = new File('https://example.com/changing');
+      respondWith('a', { 'Content-Type': 'text/plain' });
+      await file.text();
+      expect(file.type).toBe('text/plain');
+      respondWith('{}', { 'Content-Type': 'application/json' });
+      await file.text();
+      expect(file.type).toBe('application/json');
+    });
+
+    it('keeps the boundary parameter, so formData() parses a multipart response', async () => {
+      const body = [
+        '--x',
+        'Content-Disposition: form-data; name="greeting"',
+        '',
+        'hello',
+        '--x--',
+        '',
+      ].join('\r\n');
+      respondWith(body, { 'Content-Type': 'multipart/form-data; boundary=x' });
+      const form = await new File('https://example.com/form').formData();
+      // `formData()` is typed with the React Native `FormData`, which declares no `get()`.
+      expect((form as unknown as globalThis.FormData).get('greeting')).toBe('hello');
+    });
+
+    it('stays empty when the response has no Content-Type', async () => {
+      fetchMock.mockImplementation(async () => new Response(new Uint8Array([1, 2])));
+      const file = new File('blob:http://example.com/no-type');
+      await file.bytes();
+      expect(file.type).toBe('');
+    });
+
+    it('does not change after a failed read', async () => {
+      fetchMock.mockImplementation(
+        async () =>
+          new Response('missing', { status: 404, headers: { 'Content-Type': 'text/html' } })
+      );
+      const file = new File('https://example.com/missing.png');
+      await expect(file.text()).rejects.toThrow();
+      expect(file.type).toBe('');
+    });
+  });
+
+  describe('errors', () => {
+    it('rejects with the uri, the status, and the response as cause for a 404', async () => {
+      const response = new Response('not here', { status: 404, statusText: 'Not Found' });
+      fetchMock.mockResolvedValue(response);
+      const uri = 'https://example.com/missing.png';
+      const error = await new File(uri).text().catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain(uri);
+      expect(error.message).toContain('404 Not Found');
+      expect(error.cause).toBe(response);
+    });
+
+    it('rejects with the uri and the network error as cause when fetch fails', async () => {
+      const networkError = new TypeError('fetch failed');
+      fetchMock.mockRejectedValue(networkError);
+      const uri = 'https://example.com/offline.png';
+      for (const read of ['text', 'bytes', 'arrayBuffer', 'json'] as const) {
+        const error = await new File(uri)[read]().catch((e) => e);
+        expect(error).toBeInstanceOf(Error);
+        expect(error.message).toContain(uri);
+        expect(error.message).toContain('fetch failed');
+        expect(error.cause).toBe(networkError);
+      }
+    });
+
+    it('errors the stream on the first read when the fetch fails', async () => {
+      fetchMock.mockImplementation(async () => new Response(null, { status: 500 }));
+      const reader = new File('https://example.com/broken').stream().getReader();
+      await expect(reader.read()).rejects.toThrow(/https:\/\/example\.com\/broken.*500/);
+    });
+  });
+
+  it('never calls fetch for a snapshot-backed file', async () => {
+    const file = File.fromWebFile(makeWebFile());
+    await file.text();
+    await file.bytes();
+    await file.arrayBuffer();
+    await file.json().catch(() => {});
+    await readStream(file.stream());
+    await readStream(new File(file.uri).stream());
+    expect(fetchMock).not.toHaveBeenCalled();
+    file.delete();
   });
 });
 
