@@ -332,10 +332,14 @@ function rejects(t: WptTest, promise: Promise<unknown>, d: any, check: (e: unkno
 let uninstallActive: (() => void) | null = null;
 
 /**
- * Defines the testharness globals for one suite run. Returns a function that removes them, and
- * every global the vendored support files added (such as `self.test_blob`), again.
+ * Defines the testharness globals, then calls `registerFiles`. Returns a function that removes the
+ * globals and the ones the vendored support files added while registering (such as
+ * `self.test_blob`), and nothing that other suites add later.
+ *
+ * Jasmine registers every selected suite before it runs any spec, and the suite removes the globals
+ * in its `afterAll`, so a suite that runs earlier in the same run also sees them.
  */
-export function installWptGlobals(): () => void {
+export function installWptGlobals(registerFiles: () => void): () => void {
   // A cancelled run never reaches its `afterAll`, so drop what it left behind first.
   uninstallActive?.();
   const g = globalThis as any;
@@ -345,29 +349,80 @@ export function installWptGlobals(): () => void {
   if (shadowed.length) throw new Error(`WPT harness would shadow globals: ${shadowed.join(', ')}`);
   if (g.self === undefined) g.self = g;
   Object.assign(g, harness);
+  registerFiles();
+  const added = Object.getOwnPropertyNames(g).filter((name) => !before.has(name));
   uninstallActive = () => {
-    for (const name of Object.getOwnPropertyNames(g)) {
-      if (!before.has(name)) delete g[name];
-    }
+    added.forEach((name) => delete g[name]);
     uninstallActive = null;
   };
   return uninstallActive;
 }
 
-/** Runs one vendored file inside its own `describe`, one `it` per WPT test. */
-export function describeWptFile(t: JasmineInterface, file: WptFile) {
+/** Known failures of one platform: `{ "<file>": { "<test name>": "fail" } }`. */
+export type WptExpectations = Record<string, Record<string, 'fail'>>;
+
+export type WptCounts = { total: number; passed: number; expectedFailures: number };
+
+/**
+ * Runs one vendored file inside its own `describe`, one `it` per WPT test, and logs the file's
+ * score when it finishes. A test listed in `expected` that fails is marked pending, so it counts
+ * neither as passed nor as failed; one that passes fails, so the list cannot go stale.
+ */
+export function describeWptFile(
+  t: JasmineInterface,
+  file: WptFile,
+  expected: Record<string, 'fail'> = {},
+  counts: WptCounts = { total: 0, passed: 0, expectedFailures: 0 }
+): WptCounts {
   t.describe(file.path, () => {
-    register = (name, body) => t.it(name, body);
+    const names = new Set<string>();
+    register = (name, body) => {
+      // Upstream reports a duplicate name as a harness error, so it fails the whole file.
+      if (names.has(name)) throw new Error(`duplicate test name: ${name}`);
+      names.add(name);
+      counts.total++;
+      t.it(name, async () => {
+        let failed = false;
+        let error: unknown;
+        try {
+          await body();
+        } catch (e) {
+          failed = true;
+          error = e;
+        }
+        if (expected[name] !== 'fail') {
+          if (failed) throw error;
+          counts.passed++;
+        } else if (failed) {
+          counts.expectedFailures++;
+          t.pending(`expected failure: ${String((error as any)?.message ?? error)}`);
+        } else {
+          throw new Error('unexpected pass: remove it from expectations');
+        }
+      });
+    };
     try {
       file.scripts.forEach((script) => script());
       file.run();
     } catch (e) {
       // Upstream reports this as a harness error; tests registered before the throw still run.
+      // Not a WPT test, so it is not counted in the file's total.
       t.it('(harness) top-level script', () => {
         throw e;
       });
     } finally {
       register = null;
     }
+    const stale = Object.keys(expected).filter((name) => !names.has(name));
+    if (stale.length) {
+      t.it('(harness) expectations name existing tests', () => {
+        throw new Error(`no such tests, remove them from expectations: ${stale.join(', ')}`);
+      });
+    }
+    t.afterAll(() => {
+      const { passed, total, expectedFailures } = counts;
+      console.log(`[WPT] ${file.path}: ${passed}/${total} (${expectedFailures} expected failures)`);
+    });
   });
+  return counts;
 }
