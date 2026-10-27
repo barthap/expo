@@ -1,5 +1,7 @@
 package expo.modules.blob
 
+import android.content.ContentResolver
+import android.net.Uri
 import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 import expo.modules.kotlin.sharedobjects.SharedObject
@@ -15,7 +17,11 @@ internal const val DEFAULT_TYPE = ""
 
 internal class Blob(val blobParts: List<InternalBlobPart> = listOf(), rawType: String = DEFAULT_TYPE) : SharedObject() {
   val size: Int by lazy {
-    blobParts.sumOf { it.size() }
+    try {
+      blobParts.fold(0) { acc, part -> Math.addExact(acc, part.size()) }
+    } catch (e: ArithmeticException) {
+      throw BlobTooLargeException()
+    }
   }
 
   val type = if (validType(rawType)) {
@@ -24,8 +30,13 @@ internal class Blob(val blobParts: List<InternalBlobPart> = listOf(), rawType: S
     DEFAULT_TYPE
   }
 
+  // File parts are not counted, because their bytes stay in the file. Not checked for overflow like
+  // `size`: it is only a memory pressure hint, read while the Blob is registered, so it must not throw.
+  val inMemorySize: Int
+    get() = blobParts.sumOf { it.inMemorySize() }
+
   override fun getAdditionalMemoryPressure(): Int {
-    return size
+    return inMemorySize
   }
 
   fun bytesToStream(byteStream: ByteArrayOutputStream) {
@@ -50,6 +61,7 @@ internal class Blob(val blobParts: List<InternalBlobPart> = listOf(), rawType: S
       is InternalBlobPart.StringWrapper -> InternalBlobPart.BufferWrapper(cachedBytes.slice(startIndex..<endIndex).toByteArray())
       is InternalBlobPart.BlobWrapper -> InternalBlobPart.BlobWrapper(blob.slice(startIndex, endIndex, ""))
       is InternalBlobPart.BufferWrapper -> InternalBlobPart.BufferWrapper(buffer.slice(startIndex..<endIndex).toByteArray())
+      is InternalBlobPart.FileWrapper -> InternalBlobPart.FileWrapper(uri, this.offset + startIndex, endIndex - startIndex, contentResolver)
     }
   }
 
@@ -170,19 +182,35 @@ internal sealed class InternalBlobPart {
   data class BlobWrapper(val blob: Blob) : InternalBlobPart()
   data class BufferWrapper(val buffer: ByteArray) : InternalBlobPart()
 
+  /**
+   * A byte range of a file. Its bytes are not held in memory: they are read from the file on every read.
+   */
+  class FileWrapper(val uri: Uri, val offset: Long, val length: Int, val contentResolver: ContentResolver) : InternalBlobPart()
+
   fun size(): Int {
     return when (this) {
       is StringWrapper -> cachedBytes.size
       is BlobWrapper -> blob.size
       is BufferWrapper -> buffer.size
+      is FileWrapper -> length
     }
   }
 
+  fun inMemorySize(): Int {
+    return when (this) {
+      is BlobWrapper -> blob.inMemorySize
+      is FileWrapper -> 0
+      else -> size()
+    }
+  }
+
+  // File parts read their file, which throws when it is missing or unreadable
   fun bytesToStream(byteStream: ByteArrayOutputStream) {
     when (this) {
       is StringWrapper -> byteStream.write(cachedBytes)
       is BlobWrapper -> blob.bytesToStream(byteStream)
       is BufferWrapper -> byteStream.write(buffer)
+      is FileWrapper -> readFileRange(uri, offset, length, contentResolver, byteStream)
     }
   }
 }

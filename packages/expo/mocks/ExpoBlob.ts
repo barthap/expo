@@ -5,54 +5,92 @@
 
 type NativeBlobPart = string | Uint8Array | Blob;
 
+/**
+ * Reads the whole content of a file for a file-backed Blob part, or throws when the file is
+ * missing. The mock has no file system of its own: a package with an in-memory file system mock
+ * (such as expo-file-system) registers its reader under this key.
+ */
+const FILE_READER_KEY = Symbol.for('expo.blob.mockFileReader');
+type MockFileReader = (uri: string) => Uint8Array;
+
+function readMockFile(uri: string): Uint8Array {
+  const reader = (globalThis as { [FILE_READER_KEY]?: MockFileReader })[FILE_READER_KEY];
+  if (!reader) {
+    throw new Error(`No mock file reader is registered, so '${uri}' cannot be read`);
+  }
+  return reader(uri);
+}
+
 class Blob {
   readonly size: number;
   readonly type: string;
-  private readonly _bytes: Uint8Array;
+  // Returns the current bytes. In-memory parts are fixed; file-backed parts read the file on
+  // every call, like the native implementation.
+  private readonly _read: () => Uint8Array;
 
   constructor(blobParts: NativeBlobPart[] = [], options?: { type?: string }) {
-    const chunks = blobParts.map((part) => {
+    const readers = blobParts.map((part): (() => Uint8Array) => {
       if (typeof part === 'string') {
-        return new TextEncoder().encode(part);
+        const encoded = new TextEncoder().encode(part);
+        return () => encoded;
       }
       if (part instanceof Blob) {
-        return part._bytes;
+        return part._read;
       }
       if (ArrayBuffer.isView(part)) {
-        return new Uint8Array(part.buffer, part.byteOffset, part.byteLength);
+        const view = new Uint8Array(part.buffer, part.byteOffset, part.byteLength);
+        return () => view;
       }
       throw new TypeError(`Unsupported native BlobPart: ${typeof part}`);
     });
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const bytes = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    this._bytes = bytes;
-    this.size = bytes.length;
+    this._read = () => concat(readers.map((read) => read()));
+    this.size = blobParts.reduce((sum, part) => {
+      if (typeof part === 'string') {
+        return sum + new TextEncoder().encode(part).length;
+      }
+      return sum + (part instanceof Blob ? part.size : part.byteLength);
+    }, 0);
     this.type = options?.type ?? '';
   }
 
   slice(start = 0, end = this.size, contentType = ''): Blob {
-    const sliced = new Blob([], { type: contentType });
-    // @ts-expect-error: writing readonly fields of the mock
-    sliced._bytes = this._bytes.slice(start, end);
-    // @ts-expect-error: writing readonly fields of the mock
-    sliced.size = sliced._bytes.length;
-    return sliced;
+    const relativeStart = start < 0 ? Math.max(this.size + start, 0) : Math.min(start, this.size);
+    const relativeEnd = end < 0 ? Math.max(this.size + end, 0) : Math.min(end, this.size);
+    return createBlob(
+      Math.max(relativeEnd - relativeStart, 0),
+      () => this._read().slice(relativeStart, relativeEnd),
+      contentType
+    );
   }
 
   async bytes(): Promise<Uint8Array<ArrayBuffer>> {
     // A copy, like the native implementation: callers must not be able to mutate the blob
     // through the array they get back.
-    return this._bytes.slice();
+    return this._read().slice();
   }
 
   async text(): Promise<string> {
-    return new TextDecoder().decode(this._bytes);
+    return new TextDecoder().decode(this._read());
   }
+}
+
+function concat(chunks: Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+function createBlob(size: number, read: () => Uint8Array, type: string): Blob {
+  const blob = new Blob([], { type });
+  // @ts-expect-error: writing readonly fields of the mock
+  blob.size = size;
+  // @ts-expect-error: writing readonly fields of the mock
+  blob._read = read;
+  return blob;
 }
 
 // In-memory stand-in for React Native's native blob store (RCTBlobManager / BlobModule)
@@ -62,7 +100,7 @@ let nextBlobId = 0;
 function store(blob: Blob): string {
   const blobId = `mock-blob-${nextBlobId++}`;
   // A copy, like the native implementation: the store must not alias the blob's bytes.
-  reactNativeBlobStore.set(blobId, blob['_bytes'].slice());
+  reactNativeBlobStore.set(blobId, blob['_read']().slice());
   return blobId;
 }
 
@@ -89,5 +127,11 @@ function fromReactNativeBlob(reference: { blobId: string; offset: number; size: 
   return new Blob([stored.slice(offset, offset + size)]);
 }
 
-export { Blob, store, release, fromReactNativeBlob, reactNativeBlobStore };
-export default { Blob, store, release, fromReactNativeBlob, reactNativeBlobStore };
+function fromFileRange(reference: { uri: string; offset: number; size: number }): Blob {
+  const { uri, offset, size } = reference;
+  // Like the native implementation: the file is read on every read, not here
+  return createBlob(size, () => readMockFile(uri).slice(offset, offset + size), '');
+}
+
+export { Blob, store, release, fromReactNativeBlob, fromFileRange, reactNativeBlobStore };
+export default { Blob, store, release, fromReactNativeBlob, fromFileRange, reactNativeBlobStore };

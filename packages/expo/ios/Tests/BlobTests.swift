@@ -142,6 +142,8 @@ private func describe(_ parts: [BlobPart]) -> [String] {
       return "blob:\(blob.size)"
     case .data(let data):
       return "data:\([UInt8](data))"
+    case .file(let url, let offset, let length):
+      return "file:\(url.lastPathComponent)@\(offset)+\(length)"
     }
   }
 }

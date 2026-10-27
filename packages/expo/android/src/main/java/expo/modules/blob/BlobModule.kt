@@ -53,6 +53,17 @@ class BlobModule : Module() {
       Blob(listOf(InternalBlobPart.BufferWrapper(resolveRNBlob(reference))))
     }
 
+    // A Blob with one file-backed part, which the JS constructor passes on as a Blob part.
+    // The file is not read here: its bytes are read on every read of the Blob.
+    Function("fromFileRange") { reference: FileRangeReference ->
+      val uri = fileUri(reference.uri)
+      if (reference.offset < 0 || reference.size < 0 || reference.size > Int.MAX_VALUE) {
+        throw FileRangeInvalidRangeException(reference.uri)
+      }
+      val contentResolver = appContext.reactContext?.contentResolver ?: throw Exceptions.ReactContextLost()
+      Blob(listOf(InternalBlobPart.FileWrapper(uri, reference.offset, reference.size.toInt(), contentResolver)))
+    }
+
     Class(Blob::class) {
       Constructor { blobParts: List<BlobPart>?, options: BlobOptionsBag? ->
         makeBlob(blobParts, options)

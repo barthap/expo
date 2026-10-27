@@ -31,8 +31,13 @@ internal final class Blob: SharedObject, @unchecked Sendable {
     return options.type
   }
 
+  /// The number of bytes the Blob holds in memory. File parts are not counted, because their bytes stay in the file.
+  var inMemorySize: Int {
+    return blobParts.reduce(0) { $0 + $1.inMemorySize() }
+  }
+
   override func getAdditionalMemoryPressure() -> Int {
-    return size
+    return inMemorySize
   }
 
   @JS
@@ -94,6 +99,8 @@ internal final class Blob: SharedObject, @unchecked Sendable {
         case .blob(let blob):
           let subBlob = blob.slice(from: partStart, to: partEnd, contentType: blob.type)
           dataSlice.append(.blob(subBlob))
+        case .file(let url, let offset, _):
+          dataSlice.append(.file(url: url, offset: offset + partStart, length: length))
         }
       }
 
@@ -105,27 +112,27 @@ internal final class Blob: SharedObject, @unchecked Sendable {
   }
 
   @JS(.concurrent)
-  func text() async -> String {
-    let allBytes = await self.bytes()
+  func text() async throws -> String {
+    let allBytes = try await self.bytes()
     let data = Data(allBytes)
     // swiftlint:disable:next optional_data_string_conversion - we need a fallback mechanism to handle invalid UTF-8 sequences properly.
     return String(data: data, encoding: .utf8) ?? String(decoding: allBytes, as: UTF8.self)
   }
 
   @JS("bytes", .concurrent)
-  func bytesData() async -> Data {
-    return Data(await bytes())
+  func bytesData() async throws -> Data {
+    return Data(try await bytes())
   }
 
-  func bytes() async -> [UInt8] {
-    return bytesSync()
+  func bytes() async throws -> [UInt8] {
+    return try bytesSync()
   }
 
-  /// All part kinds hold their bytes in memory, so the Blob can also be read synchronously.
-  func bytesSync() -> [UInt8] {
+  /// Reads all parts. File parts read their file, which throws when it is missing or unreadable.
+  func bytesSync() throws -> [UInt8] {
     var result: [UInt8] = []
     for part in blobParts {
-      result.append(contentsOf: part.bytesSync())
+      result.append(contentsOf: try part.bytesSync())
     }
     return result
   }

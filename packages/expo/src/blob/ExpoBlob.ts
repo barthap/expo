@@ -3,6 +3,7 @@ import { requireNativeModule } from 'expo-modules-core';
 import type {
   BlobPart,
   ExpoBlobModule,
+  FileRangeReference,
   NativeBlob,
   ReactNativeBlobReference,
 } from './ExpoBlob.types';
@@ -51,6 +52,57 @@ const copyReactNativeBlob = (blobPart: any): NativeBlob => {
   return NativeBlobModule.fromReactNativeBlob(reference);
 };
 
+/**
+ * A Blob part that provides this method reads its bytes from a range of a file, for example
+ * `expo-file-system`'s `File`. The method returns a `FileRangeReference`. `Symbol.for` lets other
+ * packages implement it without importing `expo/blob`.
+ */
+const FILE_RANGE: unique symbol = Symbol.for('expo.blob.fileRange');
+
+type FileRangeSource = { [FILE_RANGE]: () => FileRangeReference };
+
+// The largest size of a file-backed part: Blob sizes are signed 32-bit integers on Android
+const MAX_FILE_RANGE_SIZE = 2 ** 31 - 1;
+
+const isFileRangeSource = (value: unknown): value is FileRangeSource =>
+  value != null &&
+  typeof value === 'object' &&
+  typeof (value as Partial<FileRangeSource>)[FILE_RANGE] === 'function';
+
+/**
+ * Creates a native Blob with one part that reads the referenced range of a file on every read,
+ * which the constructor then takes as an ordinary Blob part. The file is not read here.
+ */
+const createFileRangeBlob = (source: FileRangeSource): NativeBlob => {
+  // Typed as partial: the method comes from another package and is checked before use
+  const reference: Partial<FileRangeReference> | null | undefined = source[FILE_RANGE]();
+  const uri = reference?.uri;
+  const offset = reference?.offset;
+  const size = reference?.size;
+  // Native code would read a missing field as 0 and read the wrong bytes without any error
+  if (
+    typeof uri !== 'string' ||
+    typeof offset !== 'number' ||
+    typeof size !== 'number' ||
+    !Number.isSafeInteger(offset) ||
+    !Number.isSafeInteger(size) ||
+    offset < 0 ||
+    size < 0
+  ) {
+    throw new TypeError(
+      'A file-backed Blob part returned a malformed file range: it needs a string uri and ' +
+        'non-negative integer offset and size.'
+    );
+  }
+  if (size > MAX_FILE_RANGE_SIZE) {
+    throw new RangeError(
+      `The file range of '${uri}' is ${size} bytes long, but a Blob can hold at most ` +
+        `${MAX_FILE_RANGE_SIZE} bytes of a file. Use file.slice() to take a smaller range.`
+    );
+  }
+  return NativeBlobModule.fromFileRange({ uri, offset, size });
+};
+
 const inputMapping = (blobPart: BlobPart) => {
   if (blobPart instanceof ArrayBuffer) {
     return new Uint8Array(blobPart);
@@ -68,11 +120,15 @@ const inputMapping = (blobPart: BlobPart) => {
   if (isReactNativeBlob(blobPart)) {
     return copyReactNativeBlob(blobPart);
   }
+  // Checked before the generic Blob-like case below, which expo-file-system's File also matches
+  if (isFileRangeSource(blobPart)) {
+    return createFileRangeBlob(blobPart);
+  }
   if (isBlobLike(blobPart)) {
     throw new TypeError(
-      'Blob-like objects (such as expo-file-system File) cannot be passed to the Blob ' +
-        'constructor directly, because their bytes cannot be read synchronously. ' +
-        'Read the data first, for example: new Blob([await file.bytes()]).'
+      'Blob-like objects cannot be passed to the Blob constructor directly, because their ' +
+        'bytes cannot be read synchronously. Read the data first, for example: ' +
+        'new Blob([await blobLike.bytes()]).'
     );
   }
   return String(blobPart);

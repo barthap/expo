@@ -12,6 +12,9 @@ export declare class Blob {
 
   /**
    * Creates a new `Blob` object from the given parts and options.
+   *
+   * On Android and iOS, a `File` from `expo-file-system` can also be a part. Its bytes are not
+   * copied: the `Blob` reads them from the file every time it is read.
    * @param blobParts An array of `BlobPart` to include in the `Blob`.
    * @param options An optional `BlobPropertyBag` dictionary.
    */
@@ -74,6 +77,18 @@ export type ReactNativeBlobReference = {
 };
 
 /**
+ * Points at a byte range of a file, for a Blob part whose bytes are read from the file on every
+ * read. `uri` is a `file://` URI, or a `content://` URI on Android.
+ * @hidden
+ * @private
+ */
+export type FileRangeReference = {
+  uri: string;
+  offset: number;
+  size: number;
+};
+
+/**
  * @hidden
  * @private
  */
@@ -91,6 +106,10 @@ export declare class ExpoBlobModule extends NativeModule {
    * Creates a Blob with a copy of the referenced bytes from React Native's native blob store.
    */
   fromReactNativeBlob(reference: ReactNativeBlobReference): NativeBlob;
+  /**
+   * Creates a Blob with one part that reads the referenced range of a file on every read.
+   */
+  fromFileRange(reference: FileRangeReference): NativeBlob;
 }
 
 /**

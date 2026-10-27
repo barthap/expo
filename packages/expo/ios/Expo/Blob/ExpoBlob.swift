@@ -4,7 +4,7 @@ import ExpoModulesCore
 public final class ExpoBlob: Module {
   @JS
   func store(blob: Blob) throws -> String {
-    return try RNBlobStore(appContext: appContext).store(Data(blob.bytesSync()))
+    return try RNBlobStore(appContext: appContext).store(Data(try blob.bytesSync()))
   }
 
   @JS
@@ -18,5 +18,16 @@ public final class ExpoBlob: Module {
   func fromReactNativeBlob(reference: RNBlobReference) throws -> Blob {
     let data = try RNBlobStore(appContext: appContext).resolve(reference)
     return Blob(parts: [.data(data)], options: BlobOptions())
+  }
+
+  // A Blob with one file-backed part, which the JS constructor passes on as a Blob part.
+  // The file is not read here: its bytes are read on every read of the Blob.
+  @JS
+  func fromFileRange(reference: FileRangeReference) throws -> Blob {
+    let url = try fileUrl(fromUri: reference.uri)
+    guard reference.offset >= 0, reference.size >= 0, reference.size <= Int(Int32.max) else {
+      throw FileRangeInvalidRangeException(reference.uri)
+    }
+    return Blob(parts: [.file(url: url, offset: reference.offset, length: reference.size)], options: BlobOptions())
   }
 }
