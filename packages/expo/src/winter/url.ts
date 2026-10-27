@@ -65,11 +65,27 @@ declare module 'whatwg-url-minimum' {
 
   interface URLConstructor {
     createObjectURL(blob: BlobLike): string;
-    revokeObjectURL(url: URL): void;
+    revokeObjectURL(url: string | URL): void;
   }
 }
 
+// Maps each URL created for an expo `Blob` to the React Native blob store id that backs it,
+// so `revokeObjectURL` can release the bytes. RN-created URLs are never added here: RN owns
+// those ids and releases them through its own `Blob.close()` / garbage collection.
+const expoBlobUrls = new Map<string, string>();
+
 /**
+ * Creates a `blob:` URL that serves the bytes of the given `Blob`, for example as an `Image` source.
+ *
+ * React Native's own `Blob` (such as the response of `XMLHttpRequest` with `responseType = 'blob'`)
+ * is served from React Native's native blob store as before. For Expo's `Blob` and `File`, the bytes
+ * are copied into that store and stay there until `URL.revokeObjectURL` is called with the returned
+ * URL, even after the `Blob` itself is garbage collected. Like on the web, a URL that is never
+ * revoked keeps its bytes in memory for the lifetime of the app.
+ *
+ * Other Blob-like objects, such as expo-file-system's `File`, are not supported and throw an error.
+ *
+ * On Android, React Native serves these URLs as `content://` URIs through its `BlobProvider`.
  * To allow Blobs be accessed via `content://` URIs,
  * you need to register `BlobProvider` as a ContentProvider in your app's `AndroidManifest.xml`:
  *
@@ -96,27 +112,63 @@ declare module 'whatwg-url-minimum' {
 URL.createObjectURL = function createObjectURL(
   blob: Blob & { data?: { blobId: string; offset: number } }
 ) {
-  if (getBlobUrlPrefix() == null) {
-    throw new Error('Cannot create URL for blob');
-  }
-  if (blob?.data?.blobId == null) {
-    // Only React Native's built-in Blob stores its bytes in the native blob store that
-    // backs these URLs. The `expo/blob` Blob installed as the global doesn't yet, so there
-    // is no native endpoint that could serve its bytes.
+  const prefix = getBlobUrlPrefix();
+  if (prefix == null) {
+    // React Native's BlobModule exports no URL scheme. On Android, it exports one only when the
+    // app registers `BlobProvider`, see the docs above.
     throw new Error(
-      'URL.createObjectURL is not supported for this Blob implementation, because its ' +
-        'bytes are not registered in the native blob store that serves blob: URLs. ' +
-        'Read the data directly instead (e.g. `await blob.arrayBuffer()`), or write it ' +
-        'to a file with expo-file-system and use the file URI.'
+      'Cannot create URL for blob, because React Native exports no blob URL scheme. On Android, ' +
+        "register React Native's BlobProvider in AndroidManifest.xml and define the " +
+        'blob_provider_authority string resource.'
     );
   }
-  return `${getBlobUrlPrefix()}${encodeURIComponent(blob.data.blobId)}?offset=${encodeURIComponent(
-    blob.data.offset
-  )}&size=${encodeURIComponent(blob.size)}`;
+  // React Native's built-in Blob: its bytes are already in the native blob store.
+  if (blob?.data?.blobId != null) {
+    return `${prefix}${encodeURIComponent(blob.data.blobId)}?offset=${encodeURIComponent(
+      blob.data.offset
+    )}&size=${encodeURIComponent(blob.size)}`;
+  }
+  // Required lazily: `expo/blob` loads the `ExpoBlob` native module as soon as it is evaluated,
+  // and this module is evaluated as soon as anything reads the global `URL`.
+  const { Blob: ExpoBlob, storeBlobInReactNativeBlobStore } =
+    require('../blob') as typeof import('../blob');
+  // Prototype chain check instead of `instanceof`: `ExpoBlob[Symbol.hasInstance]` also matches
+  // duck-typed Blob-likes, whose bytes cannot be copied into the store synchronously.
+  if (Object.prototype.isPrototypeOf.call(ExpoBlob.prototype, blob)) {
+    // Build the URL from the id instead of wrapping it in React Native's `Blob`: that wrapper
+    // removes the id from the store when it is garbage collected, which would revoke the URL.
+    const blobId = storeBlobInReactNativeBlobStore(blob as InstanceType<typeof ExpoBlob>);
+    const url = `${prefix}${encodeURIComponent(blobId)}?offset=0&size=${encodeURIComponent(
+      blob.size
+    )}`;
+    expoBlobUrls.set(url, blobId);
+    return url;
+  }
+  throw new Error(
+    'URL.createObjectURL is not supported for this Blob implementation, because its ' +
+      'bytes are not registered in the native blob store that serves blob: URLs. ' +
+      'Read the data directly instead (e.g. `await blob.arrayBuffer()`), or write it ' +
+      'to a file with expo-file-system and use the file URI.'
+  );
 };
 
-URL.revokeObjectURL = function revokeObjectURL(_url) {
-  // Do nothing.
+/**
+ * Releases the bytes behind a URL created by `URL.createObjectURL` for Expo's `Blob` or `File`.
+ * After that, loading the URL fails.
+ *
+ * Revoking an unknown or already revoked URL does nothing, like on the web. This includes URLs
+ * created for React Native's own `Blob`, whose bytes React Native releases when that `Blob` is
+ * closed or garbage collected.
+ */
+URL.revokeObjectURL = function revokeObjectURL(url) {
+  const key = String(url);
+  const blobId = expoBlobUrls.get(key);
+  if (blobId == null) {
+    return;
+  }
+  expoBlobUrls.delete(key);
+  const { releaseBlobFromReactNativeBlobStore } = require('../blob') as typeof import('../blob');
+  releaseBlobFromReactNativeBlobStore(blobId);
 };
 
 export { URL, URLSearchParams };

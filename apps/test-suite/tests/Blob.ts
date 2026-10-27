@@ -5,8 +5,10 @@
 import { Blob, type BlobPart } from 'expo-blob';
 import { Platform } from 'expo-modules-core';
 import { releaseBlobFromReactNativeBlobStore, storeBlobInReactNativeBlobStore } from 'expo/blob';
+import React from 'react';
+import { Image } from 'react-native';
 
-import type { JasmineInterface } from '../types';
+import type { JasmineInterface, TestPortal } from '../types';
 
 export const name = 'Blob';
 
@@ -27,7 +29,17 @@ type BinaryBlobExpectations = {
   desc: string;
 };
 
-export async function test({ describe, it, expect }: JasmineInterface) {
+// A valid 1x1 grayscale PNG
+const PNG_1X1 = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0, 0,
+  0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 96, 0, 0, 0, 6, 0, 2, 48, 129,
+  208, 47, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+]);
+
+export async function test(
+  { describe, it, expect, afterEach }: JasmineInterface,
+  { setPortalChild, cleanupPortal }: TestPortal
+) {
   const test_blob = (fn: () => Blob, expectations: BlobExpectations) => {
     const expected = expectations.expected,
       type = expectations.type,
@@ -1527,6 +1539,101 @@ export async function test({ describe, it, expect }: JasmineInterface) {
 
       it('releasing an unknown id does not throw', () => {
         expect(() => releaseBlobFromReactNativeBlobStore('unknown-blob-id')).not.toThrow();
+      });
+    });
+
+    describe('URL.createObjectURL', () => {
+      // An object URL is how Blob bytes reach native consumers that only take a URI, such as
+      // `Image`. React Native serves the URL from its blob store, so these tests go through
+      // React Native's own consumers instead of reading the store back from JS.
+      const readWithXhr = (url: string): Promise<ArrayBuffer> =>
+        new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          // Android serves non-HTTP URIs to XHR only for the 'blob' response type.
+          xhr.responseType = 'blob';
+          xhr.onload = () => {
+            const reader = new FileReader();
+            reader.addEventListener('load', () => resolve(reader.result as ArrayBuffer));
+            reader.addEventListener('error', () => reject(reader.error));
+            reader.readAsArrayBuffer(xhr.response);
+          };
+          xhr.onerror = () => reject(new Error(`XHR failed for ${url}`));
+          xhr.open('GET', url);
+          xhr.send();
+        });
+
+      // Settles with whichever of `onLoad` / `onError` the Image emits first.
+      const loadImage = (uri: string): Promise<{ loaded: boolean; nativeEvent: any }> =>
+        new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error(`Image did not settle: ${uri}`)), 5000);
+          const settle = (loaded: boolean) => (event: any) => {
+            clearTimeout(timeout);
+            resolve({ loaded, nativeEvent: event.nativeEvent });
+          };
+          setPortalChild(
+            React.createElement(Image, {
+              source: { uri },
+              style: { width: 10, height: 10 },
+              onLoad: settle(true),
+              onError: settle(false),
+            })
+          );
+        });
+
+      afterEach(async () => {
+        await cleanupPortal();
+      });
+
+      it('loads an image from an Expo Blob', async () => {
+        const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
+        try {
+          const { loaded, nativeEvent } = await loadImage(url);
+          expect(loaded).toBe(true);
+          expect(nativeEvent.source.width).toBe(1);
+          expect(nativeEvent.source.height).toBe(1);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      it('serves the Blob bytes to XMLHttpRequest', async () => {
+        const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13])]);
+        const url = URL.createObjectURL(blob);
+        try {
+          const buffer = await readWithXhr(url);
+          expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(await blob.bytes()));
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      it('serves a File', async () => {
+        const url = URL.createObjectURL(new File(['file contents'], 'a.txt'));
+        try {
+          const buffer = await readWithXhr(url);
+          expect(new TextDecoder().decode(buffer)).toEqual('file contents');
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      it('stops serving the bytes after revokeObjectURL', async () => {
+        // The URL is revoked before its first load, so no image cache can hide the result.
+        const url = URL.createObjectURL(new Blob([PNG_1X1], { type: 'image/png' }));
+        // A malformed URL would also fail to load, so check that this one is a real blob URL.
+        expect(url).toMatch(/^(blob:|content:)/);
+        URL.revokeObjectURL(url);
+
+        const { loaded } = await loadImage(url);
+        expect(loaded).toBe(false);
+
+        let xhrError: any = null;
+        try {
+          await readWithXhr(url);
+        } catch (e) {
+          xhrError = e;
+        }
+        expect(xhrError).not.toBeNull();
       });
     });
   });
