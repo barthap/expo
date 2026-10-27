@@ -12,8 +12,8 @@ import { URL, URLSearchParams } from 'whatwg-url-minimum';
 
 declare namespace globalThis {
   const RN$Bridgeless: undefined | boolean;
-  const nativeModuleProxy: Record<string, unknown>;
-  function __turboModuleProxy(name: string): unknown;
+  const nativeModuleProxy: undefined | Record<string, unknown>;
+  const __turboModuleProxy: undefined | ((name: string) => unknown);
 }
 
 // TODO(@kitten): Provide BlobModule types matching native module
@@ -36,15 +36,19 @@ function getBlobUrlPrefix() {
   isSetup = true;
   // if iOS: let BLOB_URL_PREFIX = 'blob:'
 
-  // Pull the blob module without importing React Native.
-  const BlobModule =
-    globalThis.RN$Bridgeless !== true
-      ? // Legacy RN implementation
-        (globalThis.nativeModuleProxy['BlobModule'] as NativeBlobModule)
-      : // Newer RN implementation
-        (globalThis.__turboModuleProxy('BlobModule') as TurboBlobModule);
+  // Pull the blob module without importing React Native, the same way `TurboModuleRegistry` does:
+  // `__turboModuleProxy` only exists with the legacy bridge, while bridgeless mode exposes all
+  // modules through `nativeModuleProxy`.
+  const BlobModule = (globalThis.__turboModuleProxy?.('BlobModule') ??
+    globalThis.nativeModuleProxy?.['BlobModule']) as NativeBlobModule | TurboBlobModule | undefined;
+  if (BlobModule == null) {
+    return BLOB_URL_PREFIX;
+  }
 
-  const constants = 'BLOB_URI_SCHEME' in BlobModule ? BlobModule : BlobModule.getConstants();
+  const constants =
+    typeof (BlobModule as TurboBlobModule).getConstants === 'function'
+      ? (BlobModule as TurboBlobModule).getConstants()
+      : (BlobModule as NativeBlobModule);
 
   if (constants && typeof constants.BLOB_URI_SCHEME === 'string') {
     BLOB_URL_PREFIX = encodeURIComponent(constants.BLOB_URI_SCHEME) + ':';
