@@ -38,6 +38,11 @@ import { extname } from './pathUtilities/path';
  * A `File` instance can be created for any path, and does not need to exist on the filesystem during creation.
  *
  * The constructor accepts an array of strings that are joined to create the file URI. The first argument can also be a `Directory` instance (like `Paths.cache`) or a `File` instance (which creates a new reference to the same file).
+ *
+ * > **Note:** On web, there is no file system to write to yet. A `File` either holds its data in
+ * > memory, when it comes from `File.fromWebFile()`, `File.pickFileAsync()`, or
+ * > `File.downloadFileAsync()`, or only has a URI, such as a `blob:`, `data:`, or `https:` URL, and
+ * > reads it with `fetch()`. Members that need a file system are not available on web.
  * @example
  * ```ts
  * const file = new File(Paths.cache, "subdirName", "file.txt");
@@ -119,6 +124,15 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * completes in a temporary location and the file is moved into place only after success, so no
    * file is left behind when the request fails.
    *
+   * > **Note:** On web, the file is downloaded into memory with `fetch()`, and the returned file holds
+   * > its data under a `blob:` URL until you call `delete()`. The location of `destination` is
+   * > ignored, because `Paths.cache` and `Paths.document` are placeholders on web. A `File`
+   * > destination only gives the file name. Otherwise, the name comes from the `Content-Disposition`
+   * > header, then from the last segment of an `http:` or `https:` URL, and is `download` when
+   * > neither has one. `options.idempotent` is ignored, `onProgress` is called once with the
+   * > final size, and only when the downloaded file is not empty, and a non-2xx response rejects
+   * > with an error that includes the status code.
+   *
    * @param url - The URL of the file to download.
    * @param destination - The destination directory or file. If a directory is provided, the resulting filename will be determined based on the response headers.
    * @param options - Download options. When the destination already contains a file, the promise rejects with a `DestinationAlreadyExists` error unless `options.idempotent` is set to `true`. With `idempotent: true`, the download overwrites the existing file instead of failing.
@@ -143,6 +157,17 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * This overload requires `options.multipleFiles` to be `undefined` or `false`.
    *
+   * > **Note:** On web, the picker is an `<input type="file">` dialog, and `initialUri` is ignored.
+   * > Call it from a user gesture, such as a click handler. Otherwise browsers do not open the
+   * > dialog, and in browsers with `navigator.userActivation` the promise rejects with an
+   * > `ERR_USER_ACTIVATION` error instead of resolving with a canceled result. A call made while
+   * > another picker is open resolves with a canceled result. In browsers without
+   * > `navigator.userActivation`, a call made outside a user gesture never settles the promise,
+   * > because no dialog opens and no event follows.
+   * > A closed dialog is detected with the `cancel` event of file inputs, so in Chrome 37 to 112
+   * > and Safari 15.4 to 16.3 the promise may never settle when the user closes the dialog. Picked
+   * > files hold their data under a `blob:` URL until you call `delete()`.
+   *
    * @param options File picker options.
    */
   static pickFileAsync(options?: PickSingleFileOptions): Promise<PickSingleFileResult>;
@@ -150,6 +175,17 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * Opens the system file picker for selecting multiple files.
    *
    * This overload requires `options.multipleFiles` to be `true`.
+   *
+   * > **Note:** On web, the picker is an `<input type="file">` dialog, and `initialUri` is ignored.
+   * > Call it from a user gesture, such as a click handler. Otherwise browsers do not open the
+   * > dialog, and in browsers with `navigator.userActivation` the promise rejects with an
+   * > `ERR_USER_ACTIVATION` error instead of resolving with a canceled result. A call made while
+   * > another picker is open resolves with a canceled result. In browsers without
+   * > `navigator.userActivation`, a call made outside a user gesture never settles the promise,
+   * > because no dialog opens and no event follows.
+   * > A closed dialog is detected with the `cancel` event of file inputs, so in Chrome 37 to 112
+   * > and Safari 15.4 to 16.3 the promise may never settle when the user closes the dialog. Picked
+   * > files hold their data under a `blob:` URL until you call `delete()`.
    *
    * @param options File picker options.
    *
@@ -232,7 +268,7 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * Creates an instance of a file. It can be created for any path, and does not need to exist on the filesystem during creation.
    *
    * The constructor accepts an array of strings that are joined to create the file URI. The first argument can also be a `Directory` instance (like `Paths.cache`) or a `File` instance (which creates a new reference to the same file).
-   * @param uris An array of: `file:///` string URIs, `File` instances, and `Directory` instances representing an arbitrary location on the file system.
+   * @param uris An array of: `file:///` string URIs, `File` instances, and `Directory` instances representing an arbitrary location on the file system. On web, `blob:`, `data:`, and `http(s):` URIs are accepted as well. Extra path segments appended to a `blob:` or `data:` URI are dropped, because those URLs have no path to join.
    * @example
    * ```ts
    * const file = new File(Paths.cache, "subdirName", "file.txt");
@@ -243,8 +279,12 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
     this.validatePath();
   }
 
-  /*
+  /**
    * Directory containing the file.
+   *
+   * > **Note:** On web, the `blob:` and `data:` URLs of a file have an opaque path, so
+   * > `parentDirectory.uri` equals the `uri` of the file. For an `http:` or `https:` URL, it is the
+   * > parent path of the URL. In both cases it does not point to a directory that holds the file.
    */
   get parentDirectory() {
     return new Directory(Paths.dirname(this.uri));
@@ -270,6 +310,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
   /**
    * Returns a browser `File` with the data, `name`, `type`, and `lastModified` of this file.
    * Use it when a browser API needs a plain `File` instance.
+   *
+   * Throws for a file that only has a URI, because its data is not loaded. Read the data first and
+   * build the browser `File` from it:
+   * `new globalThis.File([await file.bytes()], file.name, { type: file.type })`.
    * @platform web
    */
   toWebFile(): globalThis.File {
@@ -284,6 +328,8 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * The stream reads in 1024-byte chunks by default. The underlying file handle is
    * closed automatically when the stream is fully consumed or cancelled.
+   *
+   * > **Note:** On web, this is the same as `stream()`.
    *
    * @return A byte-oriented `ReadableStream` backed by this file.
    */
@@ -300,6 +346,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * The underlying file handle is closed automatically when the stream is closed or aborted.
    *
    * @return A `WritableStream` that accepts `Uint8Array` chunks.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   writableStream() {
     if (Platform.OS === 'web') {
@@ -310,6 +360,12 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
     );
   }
 
+  /**
+   * Retrieves the content of the entire file as an `ArrayBuffer`.
+   *
+   * > **Note:** On web, a file that only has a URI is read with `fetch()`, so the promise rejects
+   * > when the request fails.
+   */
   async arrayBuffer(): Promise<ArrayBuffer> {
     if (Platform.OS === 'web') {
       return super.arrayBuffer();
@@ -318,10 +374,22 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
     return bytes.buffer as ArrayBuffer;
   }
 
+  /**
+   * Retrieves the content of the entire file as text and parses it as JSON.
+   *
+   * > **Note:** On web, a file that only has a URI is read with `fetch()`, so the promise rejects
+   * > when the request fails.
+   */
   async json(): Promise<any> {
     return JSON.parse(await this.text());
   }
 
+  /**
+   * Parses the content of the entire file as `FormData`.
+   *
+   * > **Note:** On web, a file that only has a URI is read with `fetch()`, so the promise rejects
+   * > when the request fails. The bytes are parsed with the `type` of the file as the `Content-Type`.
+   */
   async formData(): ReturnType<Response['formData']> {
     return new Response(await this.arrayBuffer(), {
       headers: this.type ? { 'Content-Type': this.type } : undefined,
@@ -332,6 +400,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * Returns a `ReadableStream` for this file. This is an alias for `readableStream()`
    * and implements the `Blob.stream()` interface.
    *
+   * > **Note:** On web, the stream of a file that only has a URI starts a `fetch()` when it is first
+   * > read, and errors when the request fails.
+   *
    * @return A byte-oriented `ReadableStream` backed by this file.
    */
   stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
@@ -341,6 +412,17 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
     return this.readableStream();
   }
 
+  /**
+   * Returns a `Blob` with the bytes of this file from `start` up to, but not including, `end`.
+   * Implements the `Blob.slice()` interface.
+   *
+   * > **Note:** On web, `slice()` throws for a file that only has a URI, because its data is not
+   * > loaded. Read the data with `bytes()` first.
+   *
+   * @param start The index of the first byte to include.
+   * @param end The index of the first byte to exclude.
+   * @param contentType The `type` of the returned `Blob`.
+   */
   slice(start?: number, end?: number, contentType?: string): Blob {
     if (Platform.OS === 'web') {
       return super.slice(start, end, contentType);
@@ -387,9 +469,16 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * including non-2xx status codes. It is rejected only when the file cannot be read, the
    * request fails, or the upload is cancelled.
    *
+   * > **Note:** On web, pass the file to `fetch()` as the request body or append it to a `FormData`
+   * > instead.
+   *
    * @param url The URL to upload the file to.
    * @param options Upload options.
    * @returns A promise that resolves to the upload result.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   upload(url: string, options?: UploadOptions): Promise<UploadResult> {
     return new UploadTask(this, url, options).uploadAsync();
@@ -400,6 +489,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * Call `uploadAsync()` on the returned task to start the upload. Use this when you need to
    * inspect task state, cancel the upload, or subscribe to progress manually.
+   *
+   * > **Note:** On web, pass the file to `fetch()` as the request body or append it to a `FormData`
+   * > instead.
    *
    * @param url The URL to upload the file to.
    * @param options Upload options.
@@ -417,6 +509,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * const result = await task.uploadAsync();
    * ```
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   createUploadTask(url: string, options?: UploadOptions): UploadTask {
     return new UploadTask(this, url, options);
@@ -427,6 +523,8 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * Call `downloadAsync()` on the returned task to start the download. Use this when you need
    * pause/resume support, task state, cancellation, or manual progress subscriptions.
+   *
+   * > **Note:** On web, use `File.downloadFileAsync()` instead.
    *
    * @param url The URL of the file to download.
    * @param destination The destination file or directory. If a directory is provided, the
@@ -445,6 +543,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * const file = await task.downloadAsync();
    * ```
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   static createDownloadTask(
     url: string,
@@ -474,6 +576,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * // Later, stop watching:
    * subscription.remove();
    * ```
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   watch(callback: (event: WatchEvent<File>) => void, options?: WatchOptions): WatchSubscription {
     return new FileSystemWatcher<File>(this.uri, callback, options, (uri) => new File(uri));

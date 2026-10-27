@@ -44,6 +44,10 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
    * Lists the contents of a directory.
    * Calling this method if the parent directory does not exist will throw an error.
    * @returns An array of `Directory` and `File` instances.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   override list(): (Directory | File)[] {
     return super
@@ -58,10 +62,24 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
     return Paths.basename(this.uri);
   }
 
+  /**
+   * Creates a file with the given name in this directory.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
+   */
   createFile(name: string, mimeType: string | null): File {
     return new File(super.createFile(name, mimeType).uri);
   }
 
+  /**
+   * Creates a directory with the given name in this directory.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
+   */
   createDirectory(name: string): Directory {
     return new Directory(super.createDirectory(name).uri);
   }
@@ -89,6 +107,10 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
    * // Later, stop watching:
    * subscription.remove();
    * ```
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   watch(
     callback: (event: WatchEvent<File | Directory>) => void,

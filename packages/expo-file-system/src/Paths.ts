@@ -6,6 +6,9 @@ import { PathUtilities } from './pathUtilities';
 export class Paths extends PathUtilities {
   /**
    * A property containing the cache directory – a place to store files that can be deleted by the system when the device runs low on storage.
+   *
+   * > **Note:** On web, this is the placeholder `file:///cache/`. It exists, but it cannot hold files yet, so
+   * > every `File` or `Directory` inside it does not exist.
    */
   static get cache() {
     return new Directory(ExpoFileSystem.cacheDirectory);
@@ -13,6 +16,9 @@ export class Paths extends PathUtilities {
 
   /**
    * A property containing the bundle directory – the directory where assets bundled with the application are stored.
+   *
+   * > **Note:** On web, this is the placeholder `file:///bundle/`. It exists, but it cannot hold files yet, so
+   * > every `File` or `Directory` inside it does not exist.
    */
   static get bundle() {
     return new Directory(ExpoFileSystem.bundleDirectory);
@@ -20,6 +26,9 @@ export class Paths extends PathUtilities {
 
   /**
    * A property containing the document directory – a place to store files that are safe from being deleted by the system.
+   *
+   * > **Note:** On web, this is the placeholder `file:///document/`. It exists, but it cannot hold files yet, so
+   * > every `File` or `Directory` inside it does not exist.
    */
   static get document() {
     return new Directory(ExpoFileSystem.documentDirectory);
@@ -37,6 +46,10 @@ export class Paths extends PathUtilities {
 
   /**
    * A property that represents the total space on device's internal storage, represented in bytes.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   static get totalDiskSpace() {
     return ExpoFileSystem.totalDiskSpace;
@@ -44,6 +57,10 @@ export class Paths extends PathUtilities {
 
   /**
    * A property that represents the available space on device's internal storage, represented in bytes.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   static get availableDiskSpace() {
     return ExpoFileSystem.availableDiskSpace;
@@ -51,6 +68,10 @@ export class Paths extends PathUtilities {
 
   /**
    * Returns an object that indicates if the specified path represents a directory.
+   *
+   * @platform android
+   * @platform ios
+   * @platform tvos
    */
   static info(...uris: string[]): PathInfo {
     return ExpoFileSystem.info(uris.join('/'));

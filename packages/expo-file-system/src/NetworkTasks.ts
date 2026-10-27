@@ -79,6 +79,10 @@ function cleanupNetworkTask(
  *
  * Upload tasks start in the `idle` state. Calling `uploadAsync()` moves the task to `active`,
  * then to `completed`, `cancelled`, or `error`.
+ *
+ * @platform android
+ * @platform ios
+ * @platform tvos
  */
 export class UploadTask {
   private _state: UploadTaskState = 'idle';
@@ -217,6 +221,10 @@ export class UploadTask {
  * Download tasks start in the `idle` state. Calling `downloadAsync()` moves the task to `active`;
  * pausing moves it to `paused`, and a completed, cancelled, or failed transfer moves it to the
  * corresponding terminal state.
+ *
+ * @platform android
+ * @platform ios
+ * @platform tvos
  */
 export class DownloadTask {
   private _state: DownloadTaskState = 'idle';

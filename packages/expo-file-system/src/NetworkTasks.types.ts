@@ -26,6 +26,8 @@ export type DownloadOptions = {
    * If `true`, downloading a file that already exists overwrites the previous one.
    * If `false`, an error is thrown when the target file already exists.
    *
+   * > **Note:** Ignored on web, because downloads there are kept in memory and never overwrite a file.
+   *
    * @default false
    */
   idempotent?: boolean;

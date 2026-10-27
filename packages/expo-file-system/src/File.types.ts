@@ -279,6 +279,8 @@ export type InfoOptions = {
 export type PickFileGeneralOptions = {
   /**
    * A URI pointing to an initial folder in which the file picker is opened.
+   *
+   * > **Note:** Ignored on web, because browsers do not let a page choose the folder.
    */
   initialUri?: string;
   /**
