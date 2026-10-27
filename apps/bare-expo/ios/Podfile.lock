@@ -216,6 +216,34 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - Expo/Benchmarks (58.0.19):
+    - ExpoModulesCore
+    - ExpoModulesJSI
+    - ExpoModulesTestCore
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-cxxstableapi
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTAppDelegate
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactAppDependencyProvider
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - Expo/Tests (58.0.19):
     - ExpoModulesCore
     - ExpoModulesJSI
@@ -334,14 +362,6 @@ PODS:
     - ExpoTaskManager
   - ExpoBattery (58.0.3):
     - ExpoModulesCore
-  - ExpoBlob (58.0.3):
-    - ExpoModulesCore
-  - ExpoBlob/Benchmarks (58.0.3):
-    - ExpoModulesCore
-    - ExpoModulesTestCore
-  - ExpoBlob/Tests (58.0.3):
-    - ExpoModulesCore
-    - ExpoModulesTestCore
   - ExpoBlur (58.0.5):
     - ExpoModulesCore
   - ExpoBrightness (58.0.2):
@@ -709,6 +729,7 @@ PODS:
     - ExpoModulesTestCore
   - ExpoSQLite/Tests (58.0.14):
     - ExpoModulesCore
+    - ExpoModulesTestCore
   - ExpoStatusBar (58.0.4):
     - ExpoModulesCore
   - ExpoStoreReview (58.0.2):
@@ -3375,6 +3396,7 @@ DEPENDENCIES:
   - expo-dev-menu (from `../../../packages/expo-dev-menu`)
   - expo-dev-menu-interface (from `../../../packages/expo-dev-menu-interface/ios`)
   - expo-dev-menu/Tests (from `../../../packages/expo-dev-menu`)
+  - Expo/Benchmarks (from `../../../packages/expo`)
   - Expo/Tests (from `../../../packages/expo`)
   - ExpoAgeRange (from `../../../packages/expo-age-range/ios`)
   - ExpoAI (from `../../../packages/expo-ai/ios`)
@@ -3394,9 +3416,6 @@ DEPENDENCIES:
   - ExpoBackgroundTask (from `../../../packages/expo-background-task/ios`)
   - ExpoBackgroundTask/Tests (from `../../../packages/expo-background-task/ios`)
   - ExpoBattery (from `../../../packages/expo-battery/ios`)
-  - ExpoBlob (from `../../../packages/expo-blob/ios`)
-  - ExpoBlob/Benchmarks (from `../../../packages/expo-blob/ios`)
-  - ExpoBlob/Tests (from `../../../packages/expo-blob/ios`)
   - ExpoBlur (from `../../../packages/expo-blur/ios`)
   - ExpoBrightness (from `../../../packages/expo-brightness/ios`)
   - ExpoBrownfield (from `../../../packages/expo-brownfield/ios`)
@@ -3689,9 +3708,6 @@ EXTERNAL SOURCES:
   ExpoBattery:
     inhibit_warnings: false
     :path: "../../../packages/expo-battery/ios"
-  ExpoBlob:
-    inhibit_warnings: false
-    :path: "../../../packages/expo-blob/ios"
   ExpoBlur:
     inhibit_warnings: false
     :path: "../../../packages/expo-blur/ios"
@@ -4121,7 +4137,7 @@ SPEC CHECKSUMS:
   EXConstants: e90e362a4ffafaa03999f456bf81d7fb8021db9d
   EXJSONUtils: d59bf6b18639752631a81818559b2675a46f99e2
   EXManifests: b0b83ad894166f7e080b18814c5e73aed46e366e
-  Expo: dbf974c6df7a0fbb3877ea2a17b6593e3be5710f
+  Expo: e3ee0a8f43e32adaabe035e4e8ccb8ef9c667277
   expo-dev-client: 630c10eb8c9a46f367b85158a8ed0baf8f82e196
   expo-dev-launcher: a2e3f730a9087e358a9ce2243b7aba94c34058dd
   expo-dev-menu: 467097ec7bcafceb0fd2d32328bc6315a0ed6ba9
@@ -4138,7 +4154,6 @@ SPEC CHECKSUMS:
   ExpoBackgroundFetch: a7f3f09822c310c201056cb86c167ed76036b048
   ExpoBackgroundTask: 58850693ca813a3da1f5410ad3dd5e2ef07e2a75
   ExpoBattery: 86e72f4bd716952355bcf77b2bdb954af0cd1741
-  ExpoBlob: f988338eff07fcbd692eabd3550210615c7354d5
   ExpoBlur: 68f7f85ae6584f0bec52a0a42ee5088b093d1473
   ExpoBrightness: c051f26a4e9cf30ddee2cd5a26581d8290ab9bdf
   ExpoBrownfield: a61c55990048122ff963aeeb4bb1de67a1a37046
@@ -4177,7 +4192,7 @@ SPEC CHECKSUMS:
   ExpoModulesCore: cd86371968bee2ad7204f06e4cb1693fd8a9a277
   ExpoModulesJSI: d9f7f7a1625c1a29cb116a6c264f1752230d4783
   ExpoModulesTestCore: ed72b7c5bffe2d5d16cf128c6322c2d1191c1734
-  ExpoModulesWorklets: 208e6112a0467df1cc21530e280d650a3adf6261
+  ExpoModulesWorklets: 8d57ed49bb7495c8fe1ac639f5920725531dca4e
   ExpoModulesWorkletsAdapter: e1ecc72bf439a1014911ae5a11197e4c2657706d
   ExpoNetwork: a42e5fe6c3c70f517b0aad167f5a3eeec2fee7a4
   ExpoNotifications: d0ab853f324bacf76f0fe32d06eba2e1f8532ca5
@@ -4192,7 +4207,7 @@ SPEC CHECKSUMS:
   ExpoSMS: c8b282d16f6ed0846beeec28f59bdf9218199d91
   ExpoSpeech: c5197a19bf647a5f0d5766fa76fa597cc3139414
   ExpoSplashScreen: 4a16996856aeceb61b1c253c5fc9b43208705fa5
-  ExpoSQLite: e36e471b931a62bae175a55fb659e2519df9a740
+  ExpoSQLite: 867c21c85a1620238834cdc68fc1e816c67c6f03
   ExpoStatusBar: 56aa9746e1bee4d8adbab12f4d7efc97000ac49f
   ExpoStoreReview: baec43b9560cbe6e03171afb26a011ffdd68cad5
   ExpoSymbols: 1260e741b35b6fd105942779895418db306645c8
@@ -4312,7 +4327,7 @@ SPEC CHECKSUMS:
   RNDateTimePicker: 5ddeb7b9142ea2b53386cf9e1737fd0ddc5a186f
   RNGestureHandler: e19fcf39b0212e0eb8bc7ca1e645500eb492f6be
   RNReanimated: a078c71ee3665233e0a40eb9efc2d5a366014437
-  RNScreens: 67fd45f1f30aa2849ab847156c133bd592a26533
+  RNScreens: f15a5bda1ddeff8575b8ce41d83885b67129f84b
   RNSVG: c35beed3dcf6fd14b50ca1fc0d4214a17ec5334d
   RNWorklets: e935487ca35a63d13358d5516af2bdd144c41071
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
