@@ -60,8 +60,11 @@ internal class NativeRequest(appContext: AppContext, internal val response: Nati
     this.requestHolder.request = request
 
     this.task = newClient.newCall(request)
-    this.task?.enqueue(this.response)
+    // Mark the response as started before enqueueing. OkHttp can call `onFailure` on its own
+    // thread before `enqueue` returns (for example, when `OkHttpFileUrlInterceptor` cannot
+    // read a `file://` URL), and `onFailure` ignores a response that is still `INITIALIZED`.
     response.onStarted()
+    this.task?.enqueue(this.response)
   }
 
   fun cancel() {
