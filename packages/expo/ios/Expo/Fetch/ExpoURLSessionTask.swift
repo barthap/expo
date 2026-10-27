@@ -41,8 +41,10 @@ internal final class ExpoURLSessionTask: NSObject, URLSessionTaskDelegate, URLSe
     let task = urlSession.dataTask(with: request as URLRequest)
     urlSessionDelegate.addDelegate(task: task, delegate: self)
     self.task = task
-    task.resume()
+    // Mark the response as started before resuming the task, so the `.started` transition is
+    // queued ahead of any callback the task delivers.
     self.delegate.urlSessionDidStart(self)
+    task.resume()
   }
 
   func cancel(urlSessionDelegate: URLSessionSessionDelegateProxy) {
