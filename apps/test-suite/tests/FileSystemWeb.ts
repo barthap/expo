@@ -155,6 +155,78 @@ export async function test({ afterEach, describe, expect, it }: JasmineInterface
       });
     });
 
+    describe('uri-backed reads', () => {
+      // Blob URLs created by the tests, not by expo-file-system, so `File` treats them as foreign.
+      const foreignBlobUrls: string[] = [];
+
+      function createForeignBlobUrl(blob: Blob): string {
+        const url = URL.createObjectURL(blob);
+        foreignBlobUrls.push(url);
+        return url;
+      }
+
+      // The MIME type without its parameters, for example `text/html` for `text/html; charset=utf-8`.
+      function essenceOf(type: string): string {
+        return type.split(';')[0]!.trim();
+      }
+
+      afterEach(() => {
+        for (const url of foreignBlobUrls.splice(0)) {
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      it('reads a data: uri and takes type from its MIME type', async () => {
+        // `{"a":1}` in base64.
+        const file = new File('data:application/json;base64,eyJhIjoxfQ==');
+        expect(file.type).toBe('application/json');
+        expect(await file.text()).toBe('{"a":1}');
+        expect(await file.json()).toEqual({ a: 1 });
+        expect(Array.from(await file.bytes())).toEqual([123, 34, 97, 34, 58, 49, 125]);
+        expect(new Uint8Array(await file.arrayBuffer()).length).toBe(7);
+        expect(await readStream(file.stream())).toBe('{"a":1}');
+        expect(file.type).toBe('application/json');
+      });
+
+      it('reads a blob: URL that another library created', async () => {
+        const uri = createForeignBlobUrl(new Blob(['foreign data'], { type: 'text/plain' }));
+        const file = new File(uri);
+        expect(file.exists).toBe(false);
+        expect(file.type).toBe('');
+        expect(await file.text()).toBe('foreign data');
+        // The browser sends the Blob type as the Content-Type of the blob: URL.
+        expect(essenceOf(file.type)).toBe('text/plain');
+        expect((await file.bytes()).length).toBe(12);
+        expect(await readStream(file.stream())).toBe('foreign data');
+        expect(errorCodeOf(() => file.size)).toBe('ERR_UNAVAILABLE');
+      });
+
+      it('rejects with the uri and the fetch error when a blob: URL is revoked', async () => {
+        const uri = createForeignBlobUrl(new Blob(['gone']));
+        URL.revokeObjectURL(uri);
+        let error: any = null;
+        try {
+          await new File(uri).text();
+        } catch (e) {
+          error = e;
+        }
+        expect(error instanceof Error).toBe(true);
+        expect(error.message).toContain(uri);
+        expect(error.cause instanceof TypeError).toBe(true);
+      });
+
+      it('reads a same-origin http: URL and caches its Content-Type', async () => {
+        // The dev server serves the test-suite page itself, so its URL always exists.
+        const file = new File(location.href);
+        expect(file.exists).toBe(false);
+        expect(file.type).toBe('');
+        const html = await file.text();
+        expect(/<!DOCTYPE|<html/i.test(html)).toBe(true);
+        // The dev server may add a `charset` parameter, which `type` keeps.
+        expect(essenceOf(file.type)).toBe('text/html');
+      });
+    });
+
     describe('unsupported members', () => {
       it('throw or reject with UnavailabilityError', async () => {
         const file = fromWebFile(makeWebFile());
