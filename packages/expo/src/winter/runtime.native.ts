@@ -28,6 +28,20 @@ install('structuredClone', () => require('@ungap/structured-clone').default);
 
 installFormDataPatch(FormData);
 
+// https://tc39.es/proposal-arraybuffer-base64/spec/
+// Hermes does not ship these yet. The install keeps any of them the engine has natively, and the
+// module is not loaded at all when the engine has every one.
+if (
+  typeof Uint8Array.fromBase64 !== 'function' ||
+  typeof Uint8Array.fromHex !== 'function' ||
+  typeof Uint8Array.prototype.toBase64 !== 'function' ||
+  typeof Uint8Array.prototype.toHex !== 'function' ||
+  typeof Uint8Array.prototype.setFromBase64 !== 'function' ||
+  typeof Uint8Array.prototype.setFromHex !== 'function'
+) {
+  require('./Uint8ArrayBase64').installUint8ArrayBase64();
+}
+
 // Polyfill async iterator symbol for Hermes.
 // @ts-expect-error: readonly property only applies when the engine supports it
 Symbol.asyncIterator ??= Symbol.for('Symbol.asyncIterator');
