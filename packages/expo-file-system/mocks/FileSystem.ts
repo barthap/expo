@@ -52,6 +52,24 @@ const store = new Map<string, Entry>();
   return entry.bytes ?? new Uint8Array(0);
 };
 
+// expo's ExpoBlob mock writes a Blob for `blob.stream().pipeTo(file.writableStream())` through this
+// writer. Like the native copy, it writes from the start of the file without truncating it.
+(globalThis as { [key: symbol]: unknown })[Symbol.for('expo.blob.mockFileWriter')] = (
+  uri: string,
+  bytes: Uint8Array
+): void => {
+  const key = normalizeKey(uri);
+  const entry = store.get(key);
+  if (!entry || entry.kind !== 'file' || !entry.exists) {
+    throw new Error(`Unable to write the Blob to '${uri}'`);
+  }
+  const prior = entry.bytes ?? new Uint8Array(0);
+  const merged = new Uint8Array(Math.max(prior.length, bytes.length));
+  merged.set(prior, 0);
+  merged.set(bytes, 0);
+  store.set(key, { ...entry, bytes: merged, modifiedAt: nextMockTimestamp() });
+};
+
 const SEED_DIRS = [documentDirectory, cacheDirectory, bundleDirectory];
 
 function seed() {

@@ -41,6 +41,12 @@ const FILE_RANGE: unique symbol = Symbol.for('expo.blob.fileRange');
 
 type FileRangeReference = { uri: string; offset: number; size: number };
 
+/**
+ * `Blob.stream().pipeTo()` from `expo/blob` copies the Blob natively into a `WritableStream` that
+ * has this property. Its value is a `{ uri }` record of the file the stream writes to.
+ */
+const FILE_SINK: unique symbol = Symbol.for('expo.blob.fileSink');
+
 function fileRangePart(reference: FileRangeReference): BlobPart {
   // The declared Blob part types do not include file ranges, which are internal to expo and
   // expo-file-system, so the part is typed as a Blob part here.
@@ -360,6 +366,10 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    *
    * The underlying file handle is closed automatically when the stream is closed or aborted.
    *
+   * On Android and iOS, piping the `stream()` of a `Blob` from `expo/blob` into it copies the `Blob`
+   * to the file natively, with the same bytes as `blob.bytes()`. The native copy is used only when
+   * nothing was written through the stream yet.
+   *
    * @return A `WritableStream` that accepts `Uint8Array` chunks.
    *
    * @platform android
@@ -370,9 +380,20 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
     if (Platform.OS === 'web') {
       return super.writableStream();
     }
-    return new WritableStream<Uint8Array>(
-      new FileSystemWritableSink(super.open(FileMode.WriteOnly))
-    );
+    const handle = super.open(FileMode.WriteOnly);
+    const stream = new WritableStream<Uint8Array>(new FileSystemWritableSink(handle));
+    // Tagged only after `open()` passed its permission check. The handle stays open, and the native
+    // copy writes from the start of the file like the handle, then closes the stream. It runs only
+    // while `offset` is 0, so it never overwrites chunks already written through the stream.
+    const offset = (): number | null => {
+      try {
+        return handle.offset;
+      } catch {
+        return null;
+      }
+    };
+    Object.defineProperty(stream, FILE_SINK, { value: { uri: this.uri, offset } });
+    return stream;
   }
 
   /**

@@ -779,6 +779,84 @@ describe('File as a part of an expo Blob', () => {
   });
 });
 
+describe('File.writableStream() as a native Blob sink', () => {
+  const FILE_SINK = Symbol.for('expo.blob.fileSink');
+
+  function makeFile(name: string, contents: string): File {
+    const file = new File(Paths.cache, name);
+    file.create();
+    file.writeSync(contents);
+    return file;
+  }
+
+  it('tags the stream with the uri of the file', () => {
+    const file = makeFile('sink.txt', '');
+    const stream = file.writableStream();
+    // Non-enumerable, so it does not show up when the stream is inspected
+    expect(Object.getOwnPropertyDescriptor(stream, FILE_SINK)).toMatchObject({
+      value: { uri: file.uri, offset: expect.any(Function) },
+      enumerable: false,
+    });
+  });
+
+  it('reports the position of its handle, so a native copy cannot overwrite earlier writes', async () => {
+    const file = makeFile('sink-offset.txt', '');
+    const stream = file.writableStream();
+    const { offset } = (stream as unknown as { [FILE_SINK]: { offset: () => number | null } })[
+      FILE_SINK
+    ];
+    expect(offset()).toBe(0);
+
+    const writer = stream.getWriter();
+    await writer.write(new Uint8Array([1, 2, 3]));
+    expect(offset()).toBe(3);
+
+    // A closed handle has no position, and reading it must not throw
+    await writer.close();
+    expect(offset()).toBeNull();
+  });
+
+  it('throws before tagging anything when the file cannot be opened', () => {
+    // The tag lets the native copy write by path, so it must exist only after open() succeeded
+    const file = new File(Paths.cache, 'missing.txt');
+    expect(() => file.writableStream()).toThrow('File does not exist');
+  });
+
+  it('receives a piped Blob with the same bytes as the chunks would write', async () => {
+    const source = makeFile('source.txt', 'abcdefghij');
+    const destination = makeFile('destination.txt', '0123456789XYZ');
+    const blob = new Blob(['<', source.slice(2, 5), new Uint8Array([33])]);
+    // The ExpoBlob mock copies through this writer, which only the native fast path calls
+    const writerKey = Symbol.for('expo.blob.mockFileWriter');
+    const globals = globalThis as { [key: symbol]: unknown };
+    const writer = globals[writerKey] as (uri: string, bytes: Uint8Array) => void;
+    const nativeWrite = jest.fn(writer);
+    globals[writerKey] = nativeWrite;
+    try {
+      await blob.stream().pipeTo(destination.writableStream());
+    } finally {
+      globals[writerKey] = writer;
+    }
+
+    expect(nativeWrite).toHaveBeenCalledTimes(1);
+    expect(nativeWrite).toHaveBeenCalledWith(destination.uri, expect.any(Uint8Array));
+    // Written from the start without truncating, like the write-only handle the stream opens
+    expect(destination.textSync()).toBe('<cde!56789XYZ');
+  });
+
+  it('keeps bytes written through the stream before a Blob is piped into it', async () => {
+    const destination = makeFile('destination-header.txt', '');
+    const stream = destination.writableStream();
+    const writer = stream.getWriter();
+    await writer.write(new TextEncoder().encode('header:'));
+    writer.releaseLock();
+
+    await new Blob(['body']).stream().pipeTo(stream);
+
+    expect(destination.textSync()).toBe('header:body');
+  });
+});
+
 describe('expo-file-system/legacy mock', () => {
   it('legacy API functions are mocked', () => {
     const legacy = require('expo-file-system/legacy');
