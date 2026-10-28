@@ -3,8 +3,10 @@
 // Based on tests in https://github.com/web-platform-tests/wpt/tree/master/FileAPI/blob
 
 import { Blob, type BlobPart } from 'expo-blob';
-import { Platform } from 'expo-modules-core';
+import { File as FileSystemFile, Paths } from 'expo-file-system';
+import { Platform, requireOptionalNativeModule } from 'expo-modules-core';
 import { releaseBlobFromReactNativeBlobStore, storeBlobInReactNativeBlobStore } from 'expo/blob';
+import { fetch as expoFetch } from 'expo/fetch';
 import React from 'react';
 import { Image } from 'react-native';
 
@@ -37,7 +39,7 @@ const PNG_1X1 = new Uint8Array([
 ]);
 
 export async function test(
-  { describe, it, expect, afterEach }: JasmineInterface,
+  { describe, it, expect, afterEach, pending }: JasmineInterface,
   { setPortalChild, cleanupPortal }: TestPortal
 ) {
   const test_blob = (fn: () => Blob, expectations: BlobExpectations) => {
@@ -1643,6 +1645,170 @@ export async function test(
             xhrError = e;
           }
           expect(xhrError).not.toBeNull();
+        });
+
+        it('snapshots a file-backed Blob when the URL is created', async () => {
+          // The bytes are copied into the store at creation, so a later file change does not show
+          const file = new FileSystemFile(Paths.cache, `blob-url-snapshot-${Date.now()}.txt`);
+          file.writeSync('before');
+          const url = URL.createObjectURL(new Blob([file]));
+          try {
+            file.writeSync('after!');
+            expect(new TextDecoder().decode(await readWithXhr(url))).toEqual('before');
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+          // A file that is gone by then fails the creation itself
+          const blob = new Blob([file]);
+          file.delete();
+          expect(() => URL.createObjectURL(blob)).toThrowError(/file-backed Blob part/);
+        });
+
+        it('returns the URL form that the platform serves', () => {
+          // On Android, the expo package's own provider serves it, with no BlobProvider in the app manifest
+          const url = URL.createObjectURL(new Blob(['hello']));
+          try {
+            if (Platform.OS === 'android') {
+              expect(url).toMatch(/^content:\/\/[^/]+\.ExpoBlobProvider\/[^/?]+\?offset=0&size=5$/);
+            } else {
+              expect(url).toMatch(/^blob:[^/?]+\?offset=0&size=5$/);
+            }
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        // The global `fetch` (which is `expo/fetch` in Expo apps) loads `blob:` URLs through its
+        // URLSession on iOS. On Android it takes only http(s) and file:// URLs, so it rejects
+        // `content://` URIs (known gap).
+        const fetchGap = 'the global fetch does not load content:// URIs on Android yet';
+
+        // A URL with the given range in place of the one `URL.createObjectURL` returned
+        const withRange = (url: string, offset: string, size: string) =>
+          url.replace(/\?.*$/, `?offset=${offset}&size=${size}`);
+        // Adding these two overflows a 64-bit integer, which must reject the load, not crash the app
+        const OVERFLOW_OFFSET = '9223372036854775000';
+        const OVERFLOW_SIZE = '1000';
+
+        it('serves the Blob bytes to fetch', async () => {
+          if (Platform.OS !== 'ios') {
+            pending(fetchGap);
+          }
+          const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13])]);
+          const url = URL.createObjectURL(blob);
+          try {
+            const response = await expoFetch(url);
+            expect(response.ok).toBe(true);
+            expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(
+              Array.from(await blob.bytes())
+            );
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        it('rejects fetch after revokeObjectURL', async () => {
+          if (Platform.OS !== 'ios') {
+            pending(fetchGap);
+          }
+          const url = URL.createObjectURL(new Blob(['gone']));
+          URL.revokeObjectURL(url);
+
+          let error: any = null;
+          try {
+            await expoFetch(url);
+          } catch (e) {
+            error = e;
+          }
+          expect(error).not.toBeNull();
+        });
+
+        it('rejects fetch of a range whose end overflows', async () => {
+          if (Platform.OS !== 'ios') {
+            pending(fetchGap);
+          }
+          const url = URL.createObjectURL(new Blob(['range']));
+          try {
+            let error: any = null;
+            try {
+              await expoFetch(withRange(url, OVERFLOW_OFFSET, OVERFLOW_SIZE));
+            } catch (e) {
+              error = e;
+            }
+            expect(error).not.toBeNull();
+            // The app and the store survived: the URL itself still loads
+            const response = await expoFetch(url);
+            expect(await response.text()).toEqual('range');
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        // Native code outside React Native's networking, such as another library or another app.
+        // The tester module exists only in bare-expo.
+        const BlobUrlTester = requireOptionalNativeModule<{
+          readWithSharedURLSession?(url: string): Promise<Uint8Array>;
+          readWithContentResolver?(uri: string): Promise<Uint8Array>;
+        }>('BlobUrlTester');
+        const noTester = 'the BlobUrlTester module exists only in bare-expo';
+        const readNatively = (url: string): Promise<Uint8Array> =>
+          Platform.OS === 'android'
+            ? BlobUrlTester!.readWithContentResolver!(url)
+            : BlobUrlTester!.readWithSharedURLSession!(url);
+        const nativeReader = Platform.OS === 'android' ? 'ContentResolver' : 'URLSession.shared';
+
+        it(`serves the Blob bytes to ${nativeReader}`, async () => {
+          if (!BlobUrlTester) {
+            pending(noTester);
+          }
+          const bytes = new Uint8Array(200_000).map((_, i) => (i * 13) % 256);
+          const blob = new Blob(['x', bytes]);
+          const url = URL.createObjectURL(blob);
+          try {
+            const read = await readNatively(url);
+            expect(read.length).toBe(blob.size);
+            expect(Array.from(read)).toEqual(Array.from(await blob.bytes()));
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        it(`stops serving the bytes to ${nativeReader} after revokeObjectURL`, async () => {
+          if (!BlobUrlTester) {
+            pending(noTester);
+          }
+          const url = URL.createObjectURL(new Blob(['gone']));
+          // Guard: the URL works before it is revoked, so the failure below comes from revoking
+          expect(new TextDecoder().decode(await readNatively(url))).toEqual('gone');
+          URL.revokeObjectURL(url);
+
+          let error: any = null;
+          try {
+            await readNatively(url);
+          } catch (e) {
+            error = e;
+          }
+          expect(error).not.toBeNull();
+        });
+
+        it(`rejects a range whose end overflows in ${nativeReader}`, async () => {
+          if (!BlobUrlTester) {
+            pending(noTester);
+          }
+          const url = URL.createObjectURL(new Blob(['range']));
+          try {
+            let error: any = null;
+            try {
+              await readNatively(withRange(url, OVERFLOW_OFFSET, OVERFLOW_SIZE));
+            } catch (e) {
+              error = e;
+            }
+            expect(error).not.toBeNull();
+            // The app and the store survived: the URL itself still loads
+            expect(new TextDecoder().decode(await readNatively(url))).toEqual('range');
+          } finally {
+            URL.revokeObjectURL(url);
+          }
         });
       });
 
