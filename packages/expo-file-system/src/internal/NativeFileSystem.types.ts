@@ -70,8 +70,9 @@ export declare class NativeFileSystemDirectory {
   /**
    * A boolean representing if a directory exists and can be accessed.
    *
-   * > **Note:** On web, only the `Paths.cache`, `Paths.document`, and `Paths.bundle` directories
-   * > exist. They are placeholders that cannot hold files yet.
+   * > **Note:** On web, `Paths.bundle` exists and holds nothing, and a directory in `Paths.cache` or
+   * > `Paths.document` exists when it is stored in the Origin Private File System. Call
+   * > `await Paths.ready()` before you read it there.
    */
   exists: boolean;
 
@@ -313,7 +314,8 @@ export declare class NativeFileSystemFile {
   /**
    * Deletes a file.
    *
-   * > **Note:** On web, `delete()` releases the data that the module holds for a file from
+   * > **Note:** On web, `delete()` throws for a file in `Paths.cache` or `Paths.document`: use
+   * > `deleteAsync()`. For other files, it releases the data that the module holds for a file from
    * > `File.fromWebFile()`, `File.pickFileAsync()`, or `File.downloadFileAsync()`, and revokes its
    * > `blob:` URL. After that, `exists` is `false`, but the same instance can still read the data it
    * > already holds. For a file that only has a URI, `delete()` does nothing.
@@ -349,9 +351,11 @@ export declare class NativeFileSystemFile {
    * A boolean representing if a file exists. `true` if the file exists, `false` otherwise.
    * Also, `false` if the application does not have read access to the file.
    *
-   * > **Note:** On web, `exists` is `true` while the module holds the data of the file (see
-   * > `delete()`) and for `data:` URIs. It is `false` for other URIs, including `http:` and `https:`
-   * > URLs, because checking them would need a request.
+   * > **Note:** On web, a file in `Paths.cache` or `Paths.document` exists when it is stored in the
+   * > Origin Private File System; call `await Paths.ready()` before you read it there. Any other
+   * > file exists while the module holds its data (see `delete()`) and for `data:` URIs. It is
+   * > `false` for other URIs, including `http:` and `https:` URLs, because checking them would need
+   * > a request.
    */
   exists: boolean;
 

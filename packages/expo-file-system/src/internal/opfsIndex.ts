@@ -91,6 +91,14 @@ export class OpfsIndex {
     return this.#hydration;
   }
 
+  /**
+   * Whether the browser has OPFS. When it does not, the sync readers answer the placeholder values
+   * and the write methods reject.
+   */
+  get isAvailable(): boolean {
+    return this.#isAvailable();
+  }
+
   /** Whether `ready()` has finished, so the sync readers can be used. */
   get isReady(): boolean {
     return this.#hydrated;

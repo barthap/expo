@@ -61,10 +61,12 @@ function fileRangePart(reference: FileRangeReference): BlobPart {
  *
  * The constructor accepts an array of strings that are joined to create the file URI. The first argument can also be a `Directory` instance (like `Paths.cache`) or a `File` instance (which creates a new reference to the same file).
  *
- * > **Note:** On web, there is no file system to write to yet. A `File` either holds its data in
- * > memory, when it comes from `File.fromWebFile()`, `File.pickFileAsync()`, or
- * > `File.downloadFileAsync()`, or only has a URI, such as a `blob:`, `data:`, or `https:` URL, and
- * > reads it with `fetch()`. Members that need a file system are not available on web.
+ * > **Note:** On web, a `File` in `Paths.cache` or `Paths.document` is stored in the Origin Private
+ * > File System (OPFS) of the browser, and its async members read and write it there. Sync members
+ * > that change files, such as `create()` and `delete()`, are not available for it: use
+ * > `createAsync()` and `deleteAsync()`. Any other `File` either holds its data in memory, when it
+ * > comes from `File.fromWebFile()`, `File.pickFileAsync()`, or `File.downloadFileAsync()`, or only
+ * > has a URI, such as a `blob:`, `data:`, or `https:` URL, and reads it with `fetch()`.
  * @example
  * ```ts
  * const file = new File(Paths.cache, "subdirName", "file.txt");
@@ -146,14 +148,14 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * completes in a temporary location and the file is moved into place only after success, so no
    * file is left behind when the request fails.
    *
-   * > **Note:** On web, the file is downloaded into memory with `fetch()`, and the returned file holds
-   * > its data under a `blob:` URL until you call `delete()`. The location of `destination` is
-   * > ignored, because `Paths.cache` and `Paths.document` are placeholders on web. A `File`
-   * > destination only gives the file name. Otherwise, the name comes from the `Content-Disposition`
-   * > header, then from the last segment of an `http:` or `https:` URL, and is `download` when
-   * > neither has one. `options.idempotent` is ignored, `onProgress` is called once with the
-   * > final size, and only when the downloaded file is not empty, and a non-2xx response rejects
-   * > with an error that includes the status code.
+   * > **Note:** On web, the file is downloaded with `fetch()`. When `destination` is in `Paths.cache`
+   * > or `Paths.document`, the response body is written there, like on native. Otherwise, the file is
+   * > downloaded into memory and the returned file holds its data under a `blob:` URL until you call
+   * > `delete()`; a `File` destination then only gives the file name, and `options.idempotent` is
+   * > ignored. For a directory destination, the name comes from the `Content-Disposition` header,
+   * > then from the last segment of an `http:` or `https:` URL, and is `download` when neither has
+   * > one. `onProgress` is called once with the final size, and only when the downloaded file is not
+   * > empty, and a non-2xx response rejects with an error that includes the status code.
    *
    * @param url - The URL of the file to download.
    * @param destination - The destination directory or file. If a directory is provided, the resulting filename will be determined based on the response headers.
@@ -333,8 +335,8 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * Returns a browser `File` with the data, `name`, `type`, and `lastModified` of this file.
    * Use it when a browser API needs a plain `File` instance.
    *
-   * Throws for a file that only has a URI, because its data is not loaded. Read the data first and
-   * build the browser `File` from it:
+   * Throws for a file that only has a URI or is stored in `Paths.cache` or `Paths.document`, because
+   * its data is read asynchronously. Read the data first and build the browser `File` from it:
    * `new globalThis.File([await file.bytes()], file.name, { type: file.type })`.
    * @platform web
    */
@@ -506,7 +508,8 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * > supported.
    *
    * > **Note:** On web, `slice()` returns a browser `Blob` with a copy of the bytes, and throws for
-   * > a file that only has a URI, because its data is not loaded. Read the data with `bytes()` first.
+   * > a file that only has a URI or is stored in `Paths.cache` or `Paths.document`, because its data
+   * > is read asynchronously. Read the data with `bytes()` first.
    *
    * @param start The index of the first byte to include.
    * @param end The index of the first byte to exclude.

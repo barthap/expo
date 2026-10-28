@@ -393,7 +393,7 @@ describe('File.downloadFileAsync on web', () => {
 
   it('returns a snapshot-backed file that holds the downloaded data', async () => {
     respondWith('downloaded data', { headers: { 'Content-Type': 'text/csv;charset=utf-8' } });
-    const file = await download('https://example.com/files/report.csv', Paths.cache);
+    const file = await download('https://example.com/files/report.csv', Paths.bundle);
     expect(file).toBeInstanceOf(File);
     expect(file.uri.startsWith('blob:')).toBe(true);
     expect(file.exists).toBe(true);
@@ -410,7 +410,7 @@ describe('File.downloadFileAsync on web', () => {
       respondWith('x', { headers: { 'Content-Disposition': 'attachment; filename="server.txt"' } });
       const file = await download(
         'https://example.com/url.txt',
-        new File(Paths.document, 'mine.txt')
+        new File(Paths.bundle, 'mine.txt')
       );
       expect(file.name).toBe('mine.txt');
     });
@@ -432,7 +432,7 @@ describe('File.downloadFileAsync on web', () => {
       ],
     ])('comes from Content-Disposition with %s', async (_, header, name) => {
       respondWith('x', { headers: { 'Content-Disposition': header } });
-      const file = await download('https://example.com/url-name.bin', Paths.cache);
+      const file = await download('https://example.com/url-name.bin', Paths.bundle);
       expect(file.name).toBe(name);
     });
 
@@ -444,7 +444,7 @@ describe('File.downloadFileAsync on web', () => {
       ['download for a malformed percent-encoding', 'https://example.com/a/%E9.txt', 'download'],
     ])('falls back to %s of the URL', async (_, url, name) => {
       respondWith('x');
-      const file = await download(url, Paths.cache);
+      const file = await download(url, Paths.bundle);
       expect(file.name).toBe(name);
     });
 
@@ -452,7 +452,7 @@ describe('File.downloadFileAsync on web', () => {
       respondWith('x', {
         headers: { 'Content-Disposition': `attachment; filename*=UTF-8''%ZZ.txt` },
       });
-      const file = await download('https://example.com/from-url.txt', Paths.cache);
+      const file = await download('https://example.com/from-url.txt', Paths.bundle);
       expect(file.name).toBe('from-url.txt');
     });
 
@@ -462,14 +462,14 @@ describe('File.downloadFileAsync on web', () => {
         Object.defineProperty(response, 'url', { value: 'https://cdn.example.com/real.zip' });
         return response;
       });
-      const file = await download('https://example.com/latest', Paths.cache);
+      const file = await download('https://example.com/latest', Paths.bundle);
       expect(file.name).toBe('real.zip');
     });
   });
 
   it('sends the headers from the options', async () => {
     respondWith('x');
-    await download('https://example.com/a.txt', Paths.cache, {
+    await download('https://example.com/a.txt', Paths.bundle, {
       headers: { Authorization: 'Bearer token' },
     });
     const init = fetchMock.mock.calls[0]![1]!;
@@ -478,7 +478,7 @@ describe('File.downloadFileAsync on web', () => {
 
   it('downloads a data: URL with the real fetch', async () => {
     fetchMock.mockRestore();
-    const file = await download('data:application/json,{"a":1}', Paths.cache);
+    const file = await download('data:application/json,{"a":1}', Paths.bundle);
     expect(await file.json()).toEqual({ a: 1 });
     expect(file.type).toBe('application/json');
     expect(file.name).toBe('download');
@@ -487,7 +487,7 @@ describe('File.downloadFileAsync on web', () => {
   it('sends one final progress event with the downloaded size', async () => {
     respondWith('12345');
     const onProgress = jest.fn();
-    await download('https://example.com/a.txt', Paths.cache, { onProgress });
+    await download('https://example.com/a.txt', Paths.bundle, { onProgress });
     expect(onProgress.mock.calls).toEqual([[{ bytesWritten: 5, totalBytes: 5 }]]);
   });
 
@@ -496,7 +496,7 @@ describe('File.downloadFileAsync on web', () => {
     fetchMock.mockResolvedValue(response);
     const createObjectURL = jest.spyOn(URL, 'createObjectURL');
     const url = 'https://example.com/secret.txt';
-    const error = await File.downloadFileAsync(url, Paths.cache).catch((e) => e);
+    const error = await File.downloadFileAsync(url, Paths.bundle).catch((e) => e);
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain(url);
     expect(error.message).toContain('403 Forbidden');
@@ -514,7 +514,7 @@ describe('File.downloadFileAsync on web', () => {
         })
     );
     const controller = new AbortController();
-    const promise = File.downloadFileAsync('https://example.com/slow.bin', Paths.cache, {
+    const promise = File.downloadFileAsync('https://example.com/slow.bin', Paths.bundle, {
       signal: controller.signal,
     });
     await Promise.resolve();
@@ -535,7 +535,7 @@ describe('File.downloadFileAsync on web', () => {
       return response;
     });
     const createObjectURL = jest.spyOn(URL, 'createObjectURL');
-    const error = await File.downloadFileAsync('https://example.com/big.bin', Paths.cache, {
+    const error = await File.downloadFileAsync('https://example.com/big.bin', Paths.bundle, {
       signal: controller.signal,
     }).catch((e) => e);
     // The shared AbortError carries the abort reason, not the browser's DOMException.
@@ -545,9 +545,22 @@ describe('File.downloadFileAsync on web', () => {
     createObjectURL.mockRestore();
   });
 
+  // Node has no OPFS, like a page served over plain http. A download into `Paths.cache` would
+  // otherwise land in memory under another uri, while `write()` there rejects.
+  it('rejects ERR_OPFS_UNAVAILABLE for a destination in Paths.cache without fetching, when the browser has no OPFS', async () => {
+    const ERR_OPFS_UNAVAILABLE = expect.objectContaining({ code: 'ERR_OPFS_UNAVAILABLE' });
+    await expect(File.downloadFileAsync('https://example.com/a.txt', Paths.cache)).rejects.toEqual(
+      ERR_OPFS_UNAVAILABLE
+    );
+    await expect(
+      File.downloadFileAsync('https://example.com/a.txt', new File(Paths.document, 'a.txt'))
+    ).rejects.toEqual(ERR_OPFS_UNAVAILABLE);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects with an AbortError without fetching when the signal is already aborted', async () => {
     await expect(
-      File.downloadFileAsync('https://example.com/a.txt', Paths.cache, {
+      File.downloadFileAsync('https://example.com/a.txt', Paths.bundle, {
         signal: AbortSignal.abort(),
       })
     ).rejects.toMatchObject({ name: 'AbortError' });
@@ -639,8 +652,8 @@ describe('Directory and Paths on web', () => {
     expect(dir.parentDirectory.uri).toBe('file:///cache/');
   });
 
-  it('throws for directory operations', async () => {
-    const dir = new Directory(Paths.cache, 'sub');
+  it('throws for operations on directories outside the stored roots', async () => {
+    const dir = new Directory(Paths.bundle, 'sub');
     expect(() => dir.create()).toThrow(ERR_UNAVAILABLE);
     expect(() => dir.list()).toThrow(/Directory\.list is not available on web/);
     expect(() => dir.delete()).toThrow(ERR_UNAVAILABLE);
@@ -653,6 +666,27 @@ describe('Directory and Paths on web', () => {
     expect(() => dir.watch(() => {})).toThrow(ERR_UNAVAILABLE);
   });
 
+  // Node has no OPFS, like a page served over plain http. `Paths.cache` and `Paths.document` then
+  // keep the placeholder answers: the roots exist and are empty, nothing exists below them, and
+  // writes reject.
+  it('answers like empty placeholder roots under Paths.cache when the browser has no OPFS', async () => {
+    const dir = new Directory(Paths.cache, 'sub');
+    expect(Paths.cache.list()).toEqual([]);
+    expect(Paths.cache.size).toBe(0);
+    expect(() => dir.list()).toThrow(expect.objectContaining({ code: 'ERR_NOT_FOUND' }));
+    expect(dir.size).toBeNull();
+    expect(Paths.info('file:///cache/')).toEqual({ exists: true, isDirectory: true });
+    expect(Paths.info('file:///cache/sub')).toEqual({ exists: false, isDirectory: null });
+    expect(() => dir.create()).toThrow(/use `await directory\.createAsync\(\)`/i);
+    const ERR_OPFS_UNAVAILABLE = expect.objectContaining({ code: 'ERR_OPFS_UNAVAILABLE' });
+    await expect(dir.createAsync()).rejects.toEqual(ERR_OPFS_UNAVAILABLE);
+    await expect(new File(Paths.cache, 'a.txt').write('x')).rejects.toEqual(ERR_OPFS_UNAVAILABLE);
+    await expect(new File(Paths.cache, 'a.txt').text()).rejects.toEqual(ERR_OPFS_UNAVAILABLE);
+    await expect(dir.deleteAsync()).rejects.toEqual(
+      expect.objectContaining({ code: 'ERR_UNABLE_TO_DELETE' })
+    );
+  });
+
   it('Paths.ready() resolves at once when the browser has no OPFS', async () => {
     // Node has no `isSecureContext` or `navigator.storage`, like a page served over plain http.
     await expect(Paths.ready()).resolves.toBeUndefined();
@@ -661,7 +695,7 @@ describe('Directory and Paths on web', () => {
   it('throws for disk space and path info, and has no shared containers', () => {
     expect(() => Paths.totalDiskSpace).toThrow(ERR_UNAVAILABLE);
     expect(() => Paths.availableDiskSpace).toThrow(ERR_UNAVAILABLE);
-    expect(() => Paths.info('file:///cache/')).toThrow(ERR_UNAVAILABLE);
+    expect(() => Paths.info('file:///bundle/')).toThrow(ERR_UNAVAILABLE);
     expect(Paths.appleSharedContainers).toEqual({});
   });
 });

@@ -7,8 +7,10 @@ export class Paths extends PathUtilities {
   /**
    * A property containing the cache directory – a place to store files that can be deleted by the system when the device runs low on storage.
    *
-   * > **Note:** On web, this is the placeholder `file:///cache/`. It exists, but it cannot hold files yet, so
-   * > every `File` or `Directory` inside it does not exist.
+   * > **Note:** On web, this is `file:///cache/`, and its files are stored in the Origin Private File
+   * > System (OPFS) of the browser, like the files in `Paths.document`. Call `await Paths.ready()`
+   * > before you read `exists`, `size`, `lastModified`, `list()`, or `info()` of anything inside
+   * > it. Without OPFS in the browser, it exists, holds nothing, and writes reject.
    */
   static get cache() {
     return new Directory(ExpoFileSystem.cacheDirectory);
@@ -17,7 +19,7 @@ export class Paths extends PathUtilities {
   /**
    * A property containing the bundle directory – the directory where assets bundled with the application are stored.
    *
-   * > **Note:** On web, this is the placeholder `file:///bundle/`. It exists, but it cannot hold files yet, so
+   * > **Note:** On web, this is the placeholder `file:///bundle/`. It exists, but it cannot hold files, so
    * > every `File` or `Directory` inside it does not exist.
    */
   static get bundle() {
@@ -27,8 +29,10 @@ export class Paths extends PathUtilities {
   /**
    * A property containing the document directory – a place to store files that are safe from being deleted by the system.
    *
-   * > **Note:** On web, this is the placeholder `file:///document/`. It exists, but it cannot hold files yet, so
-   * > every `File` or `Directory` inside it does not exist.
+   * > **Note:** On web, this is `file:///document/`, and its files are stored in the Origin Private
+   * > File System (OPFS) of the browser. Call `await Paths.ready()` before you read `exists`,
+   * > `size`, `lastModified`, `list()`, or `info()` of anything inside it. Without OPFS in the
+   * > browser, it exists, holds nothing, and writes reject.
    */
   static get document() {
     return new Directory(ExpoFileSystem.documentDirectory);
