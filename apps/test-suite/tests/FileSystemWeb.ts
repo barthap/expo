@@ -1,4 +1,11 @@
 import { Directory, File, Paths } from 'expo-file-system';
+// The OPFS storage is internal until `Paths.cache` and `Paths.document` use it, so the spec below
+// reaches it through the build output. The package `exports` do not list these paths: TypeScript
+// cannot resolve them, and Metro falls back to the files with a warning.
+// @ts-expect-error: internal module, see above.
+import { getOpfsIndex } from 'expo-file-system/build/internal/opfsIndex';
+// @ts-expect-error: internal module, see above.
+import { isOpfsAvailable } from 'expo-file-system/build/internal/opfsSupport';
 
 import type { JasmineInterface } from '../types';
 
@@ -340,6 +347,84 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
         expect(errorCodeOf(() => dir.list())).toBe('ERR_UNAVAILABLE');
         expect(errorCodeOf(() => Paths.totalDiskSpace)).toBe('ERR_UNAVAILABLE');
         expect(Paths.appleSharedContainers).toEqual({});
+      });
+    });
+
+    // Runs the internal OPFS store and index against the browser's real OPFS, which jest only
+    // replaces with a fake. Everything is written below one directory that the spec removes.
+    describe('OPFS storage', () => {
+      it('writes, reads, lists, and removes entries under Paths.cache', async () => {
+        if (!isOpfsAvailable()) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        const index = getOpfsIndex();
+        await index.ready();
+        const directory = `file:///cache/opfs-store-spec-${Date.now()}/`;
+        const file = `${directory}notes%20one.txt`;
+        try {
+          await index.createDirectory(directory);
+          const written = await index.writeFile(file, new Blob(['hello opfs']));
+          expect(written.kind).toBe('file');
+          expect(written.size).toBe(10);
+
+          expect(await index.store.stat(file)).toEqual(written);
+          expect(index.entry(file)).toEqual(written);
+          expect(index.exists(directory)).toBe(true);
+          const read = await index.store.readFile(file);
+          expect(read.name).toBe('notes one.txt');
+          expect(await read.text()).toBe('hello opfs');
+          expect(await index.store.list(directory)).toEqual([
+            { name: 'notes one.txt', kind: 'file' },
+          ]);
+          expect(index.list(directory)).toEqual([{ name: 'notes one.txt', kind: 'file' }]);
+
+          const error = await index.store.readFile(`${directory}missing.txt`).catch((e: any) => e);
+          expect(error.code).toBe('ERR_NOT_FOUND');
+          expect(error.cause instanceof DOMException).toBe(true);
+        } finally {
+          await index.removeDirectory(directory, { recursive: true });
+        }
+        expect(await index.store.exists(directory)).toBe(false);
+        expect(index.exists(directory)).toBe(false);
+        expect(index.exists(file)).toBe(false);
+      });
+
+      // Writes ask for `mode: 'exclusive'`, so a second write to a file while one is open fails
+      // instead of dropping the other's data when both close.
+      it('rejects a second write to a file while one is open with ERR_FILE_LOCKED', async () => {
+        if (!isOpfsAvailable()) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        const index = getOpfsIndex();
+        await index.ready();
+        const directory = `file:///cache/opfs-lock-spec-${Date.now()}/`;
+        const file = `${directory}locked.txt`;
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const source = new ReadableStream<Uint8Array>({
+          start: (c) => {
+            controller = c;
+          },
+        });
+        try {
+          await index.createDirectory(directory);
+          const first = index.writeFile(file, source);
+          // Lets the first write open its writable before the second one asks for a lock.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const error = await index.writeFile(file, 'second').catch((e: any) => e);
+          controller.enqueue(new TextEncoder().encode('first'));
+          controller.close();
+          await first;
+
+          expect(error?.code).toBe('ERR_FILE_LOCKED');
+          expect(error?.cause?.name).toBe('NoModificationAllowedError');
+          expect(await (await index.store.readFile(file)).text()).toBe('first');
+          // The lock is released when the first write closes.
+          expect((await index.writeFile(file, 'third')).size).toBe(5);
+        } finally {
+          await index.removeDirectory(directory, { recursive: true });
+        }
       });
     });
   });
