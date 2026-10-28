@@ -33,7 +33,8 @@ function optionalRequire<T>(requirer: () => T): T | undefined {
 const LocationTestScreen = optionalRequire(() => require('./tests/Location'));
 const TaskManagerTestScreen = optionalRequire(() => require('./tests/TaskManager'));
 
-export type Module = { name: string; route?: string; test: Function };
+// `optIn` modules are left out of `/all` and run only when named
+export type Module = { name: string; route?: string; optIn?: boolean; test: Function };
 // List of all modules for tests. Each file path must be statically present for
 // the packager to pick them all up.
 export function getTestModules() {
@@ -94,6 +95,8 @@ export function getTestModules() {
     modules.push(require('./tests/ExpoUIUniversalSize'));
     modules.push(require('./tests/AppMetrics'));
     modules.push(require('./tests/FileSystem'));
+    // Opt-in benchmark: in no e2e test list and left out of `/all`, so it runs only when named
+    modules.push(require('./tests/BlobStreamBenchmark'));
     modules.push(require('./tests/Calendar'));
   }
 

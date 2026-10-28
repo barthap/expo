@@ -6,6 +6,10 @@ import { createQueryString } from '../screens/getScreenIdForLinking';
 
 // Legacy deep-link form that runs every test, e.g. `test-suite://all`.
 export default function All() {
-  const tests = createQueryString(getTestModules().map((module) => module.name));
+  const tests = createQueryString(
+    getTestModules()
+      .filter((module) => !module.optIn)
+      .map((module) => module.name)
+  );
   return <Redirect href={{ pathname: '/run', params: { tests } }} />;
 }

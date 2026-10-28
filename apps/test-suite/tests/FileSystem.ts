@@ -2296,6 +2296,171 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         });
       }
     });
+    // The native copy that `blob.stream().pipeTo(file.writableStream())` takes on Android and iOS.
+    // Each spec writes the same Blob through the native copy and through a forced JS path and
+    // compares the files byte for byte, so the native copy cannot change what ends up in the file.
+    describeWithStorage('Piping a Blob into File.writableStream()', () => {
+      function makeFile(name: string, content: string | Uint8Array): File {
+        const file = new File(testDirectory, name);
+        file.writeSync(content);
+        return file;
+      }
+
+      // A plain WritableStream, which `pipeTo` cannot recognize, writing through a handle like
+      // `writableStream()` does. Piping into it always moves the bytes through JS.
+      function jsFileSink(file: File): WritableStream<Uint8Array> {
+        const handle = file.open(FileMode.WriteOnly);
+        return new WritableStream<Uint8Array>({
+          write: (chunk) => handle.writeBytes(chunk),
+          close: () => handle.close(),
+          abort: () => handle.close(),
+        });
+      }
+
+      // Makes every JS read of the Blob fail. Only the native copy can then write the file.
+      function forbidJsReads(blob: Blob): Blob {
+        blob.slice = () => {
+          throw new Error('read through JS');
+        };
+        return blob;
+      }
+
+      function expectSameBytes(actual: Uint8Array, expected: Uint8Array) {
+        expect(actual.length).toBe(expected.length);
+        let firstDifference = -1;
+        for (let i = 0; i < actual.length; i++) {
+          if (actual[i] !== expected[i]) {
+            firstDifference = i;
+            break;
+          }
+        }
+        expect(firstDifference).toBe(-1);
+      }
+
+      // Writes the Blob to two files with the given initial content, natively and through JS
+      async function writeBothWays(
+        name: string,
+        createBlob: () => Blob,
+        initialContent: string | Uint8Array = ''
+      ): Promise<{ native: Uint8Array; js: Uint8Array }> {
+        const nativeFile = makeFile(`${name}-native.bin`, initialContent);
+        const jsFile = makeFile(`${name}-js.bin`, initialContent);
+        await forbidJsReads(createBlob()).stream().pipeTo(nativeFile.writableStream());
+        await createBlob().stream().pipeTo(jsFileSink(jsFile));
+        return { native: await nativeFile.bytes(), js: await jsFile.bytes() };
+      }
+
+      it('copies an in-memory Blob natively', async () => {
+        const { native, js } = await writeBothWays('memory', () => new ExpoBlob(['hello world']));
+        expect(new TextDecoder().decode(native)).toBe('hello world');
+        expectSameBytes(native, js);
+      });
+
+      it('copies a file-backed slice natively', async () => {
+        const source = makeFile('pipe-source.txt', 'abcdefghij');
+        const { native, js } = await writeBothWays('file-slice', () => source.slice(2, 8));
+        expect(new TextDecoder().decode(native)).toBe('cdefgh');
+        expectSameBytes(native, js);
+      });
+
+      it('copies a Blob that mixes strings, file slices, and bytes natively', async () => {
+        const source = makeFile('pipe-mixed-source.txt', 'abcdefghij');
+        const { native, js } = await writeBothWays(
+          'mixed',
+          () => new ExpoBlob(['x', source.slice(1, 4), new Uint8Array([33, 34])])
+        );
+        expect(new TextDecoder().decode(native)).toBe('xbcd!"');
+        expectSameBytes(native, js);
+      });
+
+      it('copies a Blob larger than one chunk natively', async () => {
+        const size = 1024 * 1024 + 4321;
+        const content = new Uint8Array(size).map((_, i) => (i * 13) % 256);
+        const source = makeFile('pipe-large-source.bin', content);
+        const { native, js } = await writeBothWays(
+          'large',
+          () => new ExpoBlob([content.subarray(0, 100), source.slice(100)])
+        );
+        expectSameBytes(native, content);
+        expectSameBytes(native, js);
+      });
+
+      it('leaves the bytes past the end of the Blob in a longer destination', async () => {
+        const { native, js } = await writeBothWays(
+          'longer',
+          () => new ExpoBlob(['abc']),
+          '0123456789'
+        );
+        // writableStream() does not truncate the file, on either path
+        expect(new TextDecoder().decode(native)).toBe('abc3456789');
+        expectSameBytes(native, js);
+      });
+
+      it('keeps the bytes written through the stream before the pipe', async () => {
+        // The native copy writes from the start of the file, so it must not run here
+        const header = new TextEncoder().encode('header:');
+        const nativeFile = makeFile('header-native.bin', '');
+        const jsFile = makeFile('header-js.bin', '');
+        const destination = nativeFile.writableStream();
+        const writer = destination.getWriter();
+        await writer.write(header);
+        writer.releaseLock();
+        await new ExpoBlob(['hello world']).stream().pipeTo(destination);
+
+        const jsDestination = jsFileSink(jsFile);
+        const jsWriter = jsDestination.getWriter();
+        await jsWriter.write(header);
+        jsWriter.releaseLock();
+        await new ExpoBlob(['hello world']).stream().pipeTo(jsDestination);
+
+        const native = await nativeFile.bytes();
+        expect(new TextDecoder().decode(native)).toBe('header:hello world');
+        expectSameBytes(native, await jsFile.bytes());
+      });
+
+      it('fails the same way on both paths for a missing directory', () => {
+        // Both paths open the file before anything is piped, so neither writes anything
+        const file = new File(testDirectory, 'missing-directory', 'out.bin');
+        expect(() => file.writableStream()).toThrow();
+        expect(() => file.open(FileMode.WriteOnly)).toThrow();
+      });
+
+      it('goes through JS when a signal is passed', async () => {
+        const file = makeFile('pipe-signal.bin', '');
+        const stream = forbidJsReads(new ExpoBlob(['hello'])).stream();
+        const signal = new AbortController().signal;
+        let error: unknown = null;
+        try {
+          await stream.pipeTo(file.writableStream(), { signal });
+        } catch (e) {
+          error = e;
+        }
+        // The native copy cannot honour a signal, so the Blob is read through JS
+        expect(String(error)).toMatch(/read through JS/);
+      });
+
+      it('goes through JS for pipeThrough()', async () => {
+        const file = makeFile('pipe-through.bin', '');
+        const stream = forbidJsReads(new ExpoBlob(['hello'])).stream();
+        let error: unknown = null;
+        try {
+          await stream.pipeThrough(new TransformStream()).pipeTo(file.writableStream());
+        } catch (e) {
+          error = e;
+        }
+        expect(String(error)).toMatch(/read through JS/);
+      });
+
+      if (Platform.OS === 'android') {
+        it('copies a part of a content:// URI natively', async () => {
+          const source = makeFile('pipe-content-source.txt', 'abcdefghij');
+          const contentFile = new File(source.contentUri);
+          const { native, js } = await writeBothWays('content-uri', () => contentFile.slice(3, 7));
+          expect(new TextDecoder().decode(native)).toBe('defg');
+          expectSameBytes(native, js);
+        });
+      }
+    });
     addAppleAppGroupsTestSuiteAsync({ describe, expect, it, ...t });
   });
 
