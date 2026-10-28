@@ -1,0 +1,19 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.blob.urltester'
+version = '1.0.0'
+
+expoModule {
+  canBePublished false
+}
+
+android {
+  namespace "expo.modules.blob.urltester"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}

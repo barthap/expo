@@ -1,0 +1,12 @@
+{
+  "name": "blob-url-tester",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A local module that loads URL.createObjectURL URLs through native APIs in test-suite",
+  "homepage": "https://expo.dev",
+  "author": "650 Industries, Inc.",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "workspace:*"
+  }
+}

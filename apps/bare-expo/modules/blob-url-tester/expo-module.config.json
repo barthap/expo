@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["BlobUrlTesterModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.blob.urltester.BlobUrlTesterModule"]
+  }
+}
