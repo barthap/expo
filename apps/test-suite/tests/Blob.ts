@@ -1679,9 +1679,8 @@ export async function test(
         });
 
         // The global `fetch` (which is `expo/fetch` in Expo apps) loads `blob:` URLs through its
-        // URLSession on iOS. On Android it takes only http(s) and file:// URLs, so it rejects
-        // `content://` URIs (known gap).
-        const fetchGap = 'the global fetch does not load content:// URIs on Android yet';
+        // URLSession on iOS and `content://` URIs through the ContentResolver on Android. A URL that
+        // cannot be served rejects, as on the web.
 
         // A URL with the given range in place of the one `URL.createObjectURL` returned
         const withRange = (url: string, offset: string, size: string) =>
@@ -1691,9 +1690,6 @@ export async function test(
         const OVERFLOW_SIZE = '1000';
 
         it('serves the Blob bytes to fetch', async () => {
-          if (Platform.OS !== 'ios') {
-            pending(fetchGap);
-          }
           const blob = new Blob(['ab', new Uint8Array([0, 255, 128, 10, 13])]);
           const url = URL.createObjectURL(blob);
           try {
@@ -1708,9 +1704,6 @@ export async function test(
         });
 
         it('rejects fetch after revokeObjectURL', async () => {
-          if (Platform.OS !== 'ios') {
-            pending(fetchGap);
-          }
           const url = URL.createObjectURL(new Blob(['gone']));
           URL.revokeObjectURL(url);
 
@@ -1724,9 +1717,6 @@ export async function test(
         });
 
         it('rejects fetch of a range whose end overflows', async () => {
-          if (Platform.OS !== 'ios') {
-            pending(fetchGap);
-          }
           const url = URL.createObjectURL(new Blob(['range']));
           try {
             let error: any = null;
@@ -1739,6 +1729,30 @@ export async function test(
             // The app and the store survived: the URL itself still loads
             const response = await expoFetch(url);
             expect(await response.text()).toEqual('range');
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        it('rejects fetch of a content:// URI that its provider refuses', async () => {
+          if (Platform.OS !== 'android') {
+            pending('content:// URIs exist only on Android');
+          }
+          // expo-file-system's FileProvider throws IllegalArgumentException for a path under no
+          // configured root. It must reject the fetch, not kill the app on OkHttp's thread.
+          const url = URL.createObjectURL(new Blob(['alive']));
+          try {
+            const applicationId = url.match(/^content:\/\/(.+)\.ExpoBlobProvider\//)![1];
+            let error: any = null;
+            try {
+              await expoFetch(`content://${applicationId}.FileSystemFileProvider/nope`);
+            } catch (e) {
+              error = e;
+            }
+            expect(error).not.toBeNull();
+            // The app survived: another content:// URI still loads
+            const response = await expoFetch(url);
+            expect(await response.text()).toEqual('alive');
           } finally {
             URL.revokeObjectURL(url);
           }
