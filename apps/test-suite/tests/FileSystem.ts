@@ -27,10 +27,17 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     { describe, it, pending: t.pending },
     'https://httpbingo.org/get'
   );
-  // On web, expo-file-system has no storage to write to, no watchers, no bundled files, and no
-  // path or disk info yet. Specs that need them are skipped there with `xit` and `xdescribe`, so
-  // the run lists them as skipped. The other platforms run them as usual.
+  // On web, expo-file-system stores files in `Paths.cache` and `Paths.document` in OPFS, but only
+  // through async members: the sync `create()`, `delete()`, `writeSync()`, and the other sync
+  // mutators are not available. It has no watchers, no bundled files, and no disk info. Specs that
+  // need them are skipped there with `xit` and `xdescribe`, so the run lists them as skipped. The
+  // other platforms run them as usual.
   const onWeb = Platform.OS === 'web';
+  if (onWeb) {
+    // The sync members of files in `Paths.cache` and `Paths.document` need the index of the OPFS
+    // storage, and `afterEach` reads `watcherDirectory.exists`.
+    await Paths.ready();
+  }
   // The picker specs exist only for Android and iOS. Every spec inside this block is gated to one
   // of them, so on web the block is dropped entirely: an empty `describe` aborts the whole suite
   // in the runner.

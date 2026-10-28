@@ -1,11 +1,4 @@
 import { Directory, File, Paths } from 'expo-file-system';
-// The OPFS storage is internal until `Paths.cache` and `Paths.document` use it, so the spec below
-// reaches it through the build output. The package `exports` do not list these paths: TypeScript
-// cannot resolve them, and Metro falls back to the files with a warning.
-// @ts-expect-error: internal module, see above.
-import { getOpfsIndex } from 'expo-file-system/build/internal/opfsIndex';
-// @ts-expect-error: internal module, see above.
-import { isOpfsAvailable } from 'expo-file-system/build/internal/opfsSupport';
 
 import type { JasmineInterface } from '../types';
 
@@ -14,6 +7,16 @@ export const name = 'FileSystemWeb';
 // Runs the web backend of expo-file-system against the browser's own `File`, `Blob`, `FormData`,
 // and `URL.createObjectURL`, which jest can only approximate.
 export async function test({ afterEach, describe, expect, it, pending }: JasmineInterface) {
+  // The sync members of files in `Paths.cache` and `Paths.document` need the index of the OPFS
+  // storage.
+  await Paths.ready();
+  // The same check as the package uses: a secure context and `createWritable()`.
+  const hasOpfs =
+    globalThis.isSecureContext === true &&
+    typeof navigator.storage?.getDirectory === 'function' &&
+    typeof globalThis.FileSystemFileHandle === 'function' &&
+    'createWritable' in globalThis.FileSystemFileHandle.prototype;
+
   // `File.fromWebFile()` keeps the data in memory until `delete()`, so every test cleans up.
   const createdFiles: File[] = [];
 
@@ -246,11 +249,12 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
         return type.split(';')[0]!.trim();
       }
 
+      // `Paths.bundle` is not stored, so a download there stays in memory.
       it('downloads a data: URL into memory and takes the name of a File destination', async () => {
         const progress: { bytesWritten: number; totalBytes: number }[] = [];
         const file = await download(
           'data:text/plain,hello%20web',
-          new File(Paths.cache, 'greeting.txt'),
+          new File(Paths.bundle, 'greeting.txt'),
           { onProgress: (event) => progress.push(event) }
         );
         expect(file.uri.startsWith('blob:')).toBe(true);
@@ -265,7 +269,7 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
 
       it('downloads a same-origin http: URL and takes the name from its path', async () => {
         // The dev server serves the test-suite page itself, so its URL always exists.
-        const file = await download(location.href, Paths.document);
+        const file = await download(location.href, Paths.bundle);
         expect(file.name).toBe(location.pathname.split('/').filter(Boolean).pop() ?? 'download');
         expect(essenceOf(file.type)).toBe('text/html');
         expect(/<!DOCTYPE|<html/i.test(await file.text())).toBe(true);
@@ -341,89 +345,157 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
         expect(dir.parentDirectory.uri).toBe('file:///cache/');
       });
 
-      it('throws for directory operations and disk space', () => {
+      it('throws for sync directory operations and disk space', () => {
         const dir = new Directory(Paths.cache, 'sub');
         expect(errorCodeOf(() => dir.create())).toBe('ERR_UNAVAILABLE');
-        expect(errorCodeOf(() => dir.list())).toBe('ERR_UNAVAILABLE');
+        expect(errorCodeOf(() => dir.list())).toBe('ERR_NOT_FOUND');
+        expect(errorCodeOf(() => new Directory(Paths.bundle, 'sub').list())).toBe(
+          'ERR_UNAVAILABLE'
+        );
         expect(errorCodeOf(() => Paths.totalDiskSpace)).toBe('ERR_UNAVAILABLE');
         expect(Paths.appleSharedContainers).toEqual({});
       });
     });
 
-    // Runs the internal OPFS store and index against the browser's real OPFS, which jest only
-    // replaces with a fake. Everything is written below one directory that the spec removes.
+    // `Paths.cache` and `Paths.document` against the browser's real OPFS, which jest only replaces
+    // with a fake. Each spec writes below its own directory and removes it.
     describe('OPFS storage', () => {
-      it('writes, reads, lists, and removes entries under Paths.cache', async () => {
-        if (!isOpfsAvailable()) {
+      const runId = Date.now();
+
+      it('creates, writes, reads, lists, and deletes files under Paths.cache', async () => {
+        if (!hasOpfs) {
           pending('This browser has no OPFS.');
           return;
         }
-        const index = getOpfsIndex();
-        await index.ready();
-        const directory = `file:///cache/opfs-store-spec-${Date.now()}/`;
-        const file = `${directory}notes%20one.txt`;
+        const directory = new Directory(Paths.cache, `opfs-spec-${runId}`);
         try {
-          await index.createDirectory(directory);
-          const written = await index.writeFile(file, new Blob(['hello opfs']));
-          expect(written.kind).toBe('file');
-          expect(written.size).toBe(10);
+          await directory.createAsync();
+          expect(directory.exists).toBe(true);
+          const file = new File(directory, 'notes one.txt');
+          await file.createAsync();
+          expect(file.exists).toBe(true);
+          expect(file.size).toBe(0);
+          await file.write('hello opfs');
+          await file.write('!', { append: true });
+          expect(file.size).toBe(11);
+          expect(await file.text()).toBe('hello opfs!');
+          expect(new TextDecoder().decode(await file.bytes())).toBe('hello opfs!');
+          expect(await readStream(file.stream())).toBe('hello opfs!');
+          expect(directory.list().map((item) => item.uri)).toEqual([file.uri]);
+          expect(directory.size).toBe(11);
+          expect(Paths.info(file.uri)).toEqual({ exists: true, isDirectory: false });
 
-          expect(await index.store.stat(file)).toEqual(written);
-          expect(index.entry(file)).toEqual(written);
-          expect(index.exists(directory)).toBe(true);
-          const read = await index.store.readFile(file);
-          expect(read.name).toBe('notes one.txt');
-          expect(await read.text()).toBe('hello opfs');
-          expect(await index.store.list(directory)).toEqual([
-            { name: 'notes one.txt', kind: 'file' },
-          ]);
-          expect(index.list(directory)).toEqual([{ name: 'notes one.txt', kind: 'file' }]);
+          const copy = new File(Paths.document, `opfs-spec-${runId}.txt`);
+          await file.copy(copy);
+          expect(await copy.text()).toBe('hello opfs!');
+          await copy.deleteAsync();
+          expect(copy.exists).toBe(false);
 
-          const error = await index.store.readFile(`${directory}missing.txt`).catch((e: any) => e);
-          expect(error.code).toBe('ERR_NOT_FOUND');
-          expect(error.cause instanceof DOMException).toBe(true);
+          await file.deleteAsync();
+          expect(file.exists).toBe(false);
+          expect(await rejectionCodeOf(file.text())).toBe('ERR_NOT_FOUND');
         } finally {
-          await index.removeDirectory(directory, { recursive: true });
+          await directory.deleteAsync().catch(() => {});
         }
-        expect(await index.store.exists(directory)).toBe(false);
-        expect(index.exists(directory)).toBe(false);
-        expect(index.exists(file)).toBe(false);
+        expect(directory.exists).toBe(false);
       });
 
-      // Writes ask for `mode: 'exclusive'`, so a second write to a file while one is open fails
-      // instead of dropping the other's data when both close.
-      it('rejects a second write to a file while one is open with ERR_FILE_LOCKED', async () => {
-        if (!isOpfsAvailable()) {
+      it('stores a picked or wrapped file with move(), which releases its blob: URL', async () => {
+        if (!hasOpfs) {
           pending('This browser has no OPFS.');
           return;
         }
-        const index = getOpfsIndex();
-        await index.ready();
-        const directory = `file:///cache/opfs-lock-spec-${Date.now()}/`;
-        const file = `${directory}locked.txt`;
-        let controller!: ReadableStreamDefaultController<Uint8Array>;
-        const source = new ReadableStream<Uint8Array>({
-          start: (c) => {
-            controller = c;
-          },
-        });
+        const directory = new Directory(Paths.document, `opfs-move-spec-${runId}`);
         try {
-          await index.createDirectory(directory);
-          const first = index.writeFile(file, source);
-          // Lets the first write open its writable before the second one asks for a lock.
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          const error = await index.writeFile(file, 'second').catch((e: any) => e);
-          controller.enqueue(new TextEncoder().encode('first'));
-          controller.close();
-          await first;
-
-          expect(error?.code).toBe('ERR_FILE_LOCKED');
-          expect(error?.cause?.name).toBe('NoModificationAllowedError');
-          expect(await (await index.store.readFile(file)).text()).toBe('first');
-          // The lock is released when the first write closes.
-          expect((await index.writeFile(file, 'third')).size).toBe(5);
+          await directory.createAsync();
+          const file = File.fromWebFile(makeWebFile('moved data', 'photo.txt'));
+          const blobUri = file.uri;
+          await file.move(directory);
+          expect(file.uri).toBe(new File(directory, 'photo.txt').uri);
+          expect(new File(blobUri).exists).toBe(false);
+          // A revoked blob: URL no longer resolves.
+          expect(
+            await fetch(blobUri).then(
+              () => 'resolved',
+              () => 'rejected'
+            )
+          ).toBe('rejected');
+          expect(file.exists).toBe(true);
+          expect(await file.text()).toBe('moved data');
         } finally {
-          await index.removeDirectory(directory, { recursive: true });
+          await directory.deleteAsync().catch(() => {});
+        }
+      });
+
+      it('downloads into Paths.document by piping the response body', async () => {
+        if (!hasOpfs) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        const directory = new Directory(Paths.document, `opfs-download-spec-${runId}`);
+        try {
+          await directory.createAsync();
+          const file = await File.downloadFileAsync(
+            location.href,
+            new File(directory, 'page.html')
+          );
+          expect(file.uri).toBe(new File(directory, 'page.html').uri);
+          expect(file.size > 0).toBe(true);
+          expect(/<!DOCTYPE|<html/i.test(await file.text())).toBe(true);
+          const error = await File.downloadFileAsync(location.href, file).catch((e: any) => e);
+          expect(error?.code).toBe('ERR_DESTINATION_ALREADY_EXISTS');
+        } finally {
+          await directory.deleteAsync().catch(() => {});
+        }
+      });
+
+      // Writes ask for `mode: 'exclusive'`, so a write to a file while another one is open fails
+      // instead of dropping the other's data when both close.
+      it('rejects one of two overlapping writes to a file with ERR_FILE_LOCKED', async () => {
+        if (!hasOpfs) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        const file = new File(Paths.cache, `opfs-lock-spec-${runId}.bin`);
+        try {
+          const results = await Promise.allSettled([
+            file.write(new Uint8Array(8 * 1024 * 1024).fill(1)),
+            file.write(new Uint8Array(8 * 1024 * 1024).fill(2)),
+          ]);
+          const rejected = results.filter((result) => result.status === 'rejected');
+          expect(rejected.length).toBe(1);
+          expect((rejected[0] as PromiseRejectedResult).reason?.code).toBe('ERR_FILE_LOCKED');
+          expect(file.size).toBe(8 * 1024 * 1024);
+        } finally {
+          await file.deleteAsync().catch(() => {});
+        }
+      });
+
+      // Cross-reload persistence is a manual check; see the report of the OPFS change. Within one
+      // run, the second spec reads the file the first wrote through a new `File`.
+      const persisted = () => new File(Paths.document, `opfs-persist-spec-${runId}.json`);
+
+      it('writes a file in Paths.document for the next spec', async () => {
+        if (!hasOpfs) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        await persisted().write(JSON.stringify({ runId }));
+        expect(persisted().exists).toBe(true);
+      });
+
+      it('reads the file of the previous spec through a new File after Paths.ready()', async () => {
+        if (!hasOpfs) {
+          pending('This browser has no OPFS.');
+          return;
+        }
+        await Paths.ready();
+        const file = persisted();
+        try {
+          expect(file.exists).toBe(true);
+          expect(await file.json()).toEqual({ runId });
+        } finally {
+          await file.deleteAsync().catch(() => {});
         }
       });
     });
