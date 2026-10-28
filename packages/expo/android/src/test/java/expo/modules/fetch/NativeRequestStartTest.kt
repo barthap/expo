@@ -13,7 +13,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.FileNotFoundException
-import java.net.URL
 import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
@@ -47,7 +46,7 @@ class NativeRequestStartTest {
     val response = NativeResponse(appContext, CoroutineScope(Dispatchers.Unconfined))
     val request = NativeRequest(appContext, response)
 
-    request.start(client, URL("https://example.test/"), NativeRequestInit(), null)
+    request.start(client, "https://example.test/", NativeRequestInit(), null)
 
     // `ExpoFetchModule` waits for one of these states to settle the JS promise. If the failure
     // was dropped, no state change ever comes and `fetch` hangs forever.

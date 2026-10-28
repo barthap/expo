@@ -12,7 +12,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URL
 
 private data class RequestHolder(var request: Request?)
 
@@ -36,7 +35,7 @@ internal class NativeRequest(appContext: AppContext, internal val response: Nati
   private val requestHolder = RequestHolder(null)
   private var task: Call? = null
 
-  fun start(client: OkHttpClient, url: URL, requestInit: NativeRequestInit, requestBody: ByteArray?) {
+  fun start(client: OkHttpClient, url: String, requestInit: NativeRequestInit, requestBody: ByteArray?) {
     val clientBuilder = client.newBuilder()
     if (requestInit.credentials != NativeRequestCredentials.INCLUDE) {
       clientBuilder.cookieJar(CookieJar.NO_COOKIES)

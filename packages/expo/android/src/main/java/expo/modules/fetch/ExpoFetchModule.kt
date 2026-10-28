@@ -19,7 +19,6 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import okhttp3.JavaNetCookieJar
-import java.net.URL
 
 @Suppress("unused")
 class ExpoFetchModule : Module() {
@@ -128,7 +127,7 @@ class ExpoFetchModule : Module() {
 
       AsyncFunction("start") {
           request: NativeRequest,
-          url: URL,
+          url: String,
           requestInit: NativeRequestInit,
           requestBody: ByteArray?,
           promise: Promise ->
