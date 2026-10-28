@@ -4,6 +4,9 @@ import type { JasmineInterface } from '../types';
 
 export const name = 'FileSystemWeb';
 
+// The uri of the file that the persistence specs write, read back, and delete, in this order.
+let persistedUri: string | null = null;
+
 // Runs the web backend of expo-file-system against the browser's own `File`, `Blob`, `FormData`,
 // and `URL.createObjectURL`, which jest can only approximate.
 export async function test({ afterEach, describe, expect, it, pending }: JasmineInterface) {
@@ -471,32 +474,59 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
         }
       });
 
-      // Cross-reload persistence is a manual check; see the report of the OPFS change. Within one
-      // run, the second spec reads the file the first wrote through a new `File`.
-      const persisted = () => new File(Paths.document, `opfs-persist-spec-${runId}.json`);
-
+      // A file written in one spec is still there for a new `File` in a later spec. Whether it is
+      // still there after a page reload cannot be checked in one run: run this module, reload the
+      // page, and read the file with `await Paths.ready()` and `new File(uri).text()`.
       it('writes a file in Paths.document for the next spec', async () => {
         if (!hasOpfs) {
           pending('This browser has no OPFS.');
           return;
         }
-        await persisted().write(JSON.stringify({ runId }));
-        expect(persisted().exists).toBe(true);
+        const file = new File(Paths.document, `opfs-persist-spec-${runId}.json`);
+        await file.write(JSON.stringify({ runId }));
+        expect(file.exists).toBe(true);
+        persistedUri = file.uri;
       });
 
       it('reads the file of the previous spec through a new File after Paths.ready()', async () => {
-        if (!hasOpfs) {
-          pending('This browser has no OPFS.');
+        if (!persistedUri) {
+          pending('The previous spec did not write the file.');
           return;
         }
         await Paths.ready();
-        const file = persisted();
-        try {
-          expect(file.exists).toBe(true);
-          expect(await file.json()).toEqual({ runId });
-        } finally {
-          await file.deleteAsync().catch(() => {});
+        const file = new File(persistedUri);
+        expect(file.exists).toBe(true);
+        expect(await file.json()).toEqual({ runId });
+      });
+
+      it('deletes the file of the previous specs', async () => {
+        if (!persistedUri) {
+          pending('The first spec did not write the file.');
+          return;
         }
+        const uri = persistedUri;
+        persistedUri = null;
+        await new File(uri).deleteAsync();
+        expect(new File(uri).exists).toBe(false);
+        expect(Paths.document.list().some((entry) => entry.uri === uri)).toBe(false);
+      });
+
+      // Without OPFS (an insecure context such as plain `http:` on a LAN address, or a browser
+      // without `createWritable()`), the roots stay placeholders and every write rejects.
+      it('rejects writes with ERR_OPFS_UNAVAILABLE when the browser has no OPFS', async () => {
+        if (hasOpfs) {
+          pending('This browser has OPFS.');
+          return;
+        }
+        const file = new File(Paths.document, `no-opfs-spec-${runId}.txt`);
+        expect(Paths.document.exists).toBe(true);
+        expect(Paths.document.list()).toEqual([]);
+        expect(file.exists).toBe(false);
+        expect(await rejectionCodeOf(file.write('data'))).toBe('ERR_OPFS_UNAVAILABLE');
+        expect(await rejectionCodeOf(file.createAsync())).toBe('ERR_OPFS_UNAVAILABLE');
+        expect(await rejectionCodeOf(File.downloadFileAsync(location.href, Paths.document))).toBe(
+          'ERR_OPFS_UNAVAILABLE'
+        );
       });
     });
   });

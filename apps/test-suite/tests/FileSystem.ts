@@ -31,7 +31,8 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
   // through async members: the sync `create()`, `delete()`, `writeSync()`, and the other sync
   // mutators are not available. It has no watchers, no bundled files, and no disk info. Specs that
   // need them are skipped there with `xit` and `xdescribe`, so the run lists them as skipped. The
-  // other platforms run them as usual.
+  // other platforms run them as usual. The specs that run on web use `createAsync()` and
+  // `deleteAsync()`, which call `create()` and `delete()` on the other platforms.
   const onWeb = Platform.OS === 'web';
   if (onWeb) {
     // The sync members of files in `Paths.cache` and `Paths.document` need the index of the OPFS
@@ -53,13 +54,22 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
   const describeWithWatchers = onWeb ? t.xdescribe : describe;
   // Reads files bundled with the app.
   const itWithBundle = onWeb ? t.xit : it;
-  // Reads `Paths.info()` or the disk space.
+  // Reads the disk space.
   const describeWithPathInfo = onWeb ? t.xdescribe : describe;
 
-  // The legacy API has no directories on web, so the specs that run there use the placeholder.
+  // The legacy API has no directories on web, so there the test directory is in OPFS and the
+  // hooks create and remove it with the async members.
   const testDirectory = (onWeb ? Paths.document.uri : FS.documentDirectory) + 'tests/';
   const watcherDirectory = new Directory(Paths.cache, 'watcher-tests');
   t.beforeEach(async () => {
+    if (onWeb) {
+      // A run that stopped early leaves its files behind in OPFS, which keeps them across reloads.
+      const directory = new Directory(testDirectory);
+      if (directory.exists) {
+        await directory.deleteAsync();
+      }
+      await directory.createAsync();
+    }
     try {
       await FS.makeDirectoryAsync(testDirectory);
     } catch {}
@@ -68,6 +78,12 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     }
   });
   t.afterEach(async () => {
+    if (onWeb) {
+      const directory = new Directory(testDirectory);
+      if (directory.exists) {
+        await directory.deleteAsync();
+      }
+    }
     try {
       await FS.deleteAsync(testDirectory);
     } catch {}
@@ -227,28 +243,36 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }).toThrow();
     });
 
-    describeWithStorage('When a wrong class already exists', () => {
-      it("Doesn't allow operations when a file is used with an existing folder path", () => {
-        const directory = new Directory(testDirectory, 'test');
-        directory.create();
-        const file = new File(testDirectory, 'test');
-        expect(() => {
-          file.textSync();
-        }).toThrow();
-      });
-
-      it("Doesn't allow operations when a folder is used with an existing file path", () => {
-        const file = new File(testDirectory, 'test');
-        file.create();
-        const directory = new Directory(testDirectory, 'test');
-        expect(() => {
+    describe('When a wrong class already exists', () => {
+      // `textSync()` throws on web for every file, so the spec would pass there for the wrong reason.
+      itWithStorage(
+        "Doesn't allow operations when a file is used with an existing folder path",
+        () => {
+          const directory = new Directory(testDirectory, 'test');
           directory.create();
-        }).toThrow();
+          const file = new File(testDirectory, 'test');
+          expect(() => {
+            file.textSync();
+          }).toThrow();
+        }
+      );
+
+      it("Doesn't allow operations when a folder is used with an existing file path", async () => {
+        const file = new File(testDirectory, 'test');
+        await file.createAsync();
+        const directory = new Directory(testDirectory, 'test');
+        let error;
+        try {
+          await directory.createAsync();
+        } catch (e) {
+          error = e;
+        }
+        expect(error).toBeDefined();
       });
 
-      it('Returns exists false', () => {
+      it('Returns exists false', async () => {
         const file = new File(testDirectory, 'test');
-        file.create();
+        await file.createAsync();
         const directory = new Directory(testDirectory, 'test');
         expect(file.exists).toBe(true);
         expect(directory.exists).toBe(false);
@@ -464,8 +488,9 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     }
 
-    describeWithStorage('Works with %, # and space characters in names', () => {
-      it('Works with spaces as filename', () => {
+    describe('Works with %, # and space characters in names', () => {
+      // `writeSync()` is not available on web.
+      itWithStorage('Works with spaces as filename', () => {
         const outputFile = new File(testDirectory, 'my new file.txt');
         expect(outputFile.exists).toBe(false);
         outputFile.writeSync('Hello world');
@@ -473,51 +498,51 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         expect(outputFile.name).toBe('my new file.txt');
       });
 
-      it('Works with spaces as directory name', () => {
+      it('Works with spaces as directory name', async () => {
         const dir = new Directory(testDirectory, 'my new folder');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('my new folder');
       });
 
-      it('Works with # as directory name', () => {
+      it('Works with # as directory name', async () => {
         const dir = new Directory(testDirectory, 'my#folder');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('my#folder');
       });
 
-      it('Ignores # passed in as uri path', () => {
+      it('Ignores # passed in as uri path', async () => {
         // note the + sign here – the first argument is first decoded if it is a file url, so the # is stripped
         const dir = new Directory(testDirectory + '/TestFolder#query');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('TestFolder');
       });
 
-      it('Works with # as directory name', () => {
+      it('Works with # as directory name', async () => {
         const dir = new Directory(testDirectory, 'my#folder');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('my#folder');
       });
 
-      it('Works with % as directory name', () => {
+      it('Works with % as directory name', async () => {
         const dir = new Directory(testDirectory, 'my%folder');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('my%folder');
       });
 
-      it('Works with % as file name', () => {
+      it('Works with % as file name', async () => {
         const dir = new Directory(testDirectory, 'my%file.txt');
         expect(dir.exists).toBe(false);
-        dir.create();
+        await dir.createAsync();
         expect(dir.exists).toBe(true);
         expect(dir.name).toBe('my%file.txt');
       });
@@ -531,6 +556,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('Writes a string to a file reference', () => {
       const outputFile = new File(testDirectory, 'file.txt');
       expect(outputFile.exists).toBe(false);
@@ -538,6 +564,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(outputFile.exists).toBe(true);
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('overwrites files by default when using write()', () => {
       const file = new File(testDirectory, 'overwrite-test.txt');
       file.writeSync('First');
@@ -546,6 +573,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('Second');
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('overwrites a longer file with a shorter string', () => {
       const file = new File(testDirectory, 'overwrite-shorter.txt');
       file.writeSync('This is a long string');
@@ -554,6 +582,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('Short');
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('Writes a base64 encoded string to a file reference using File.writeSync', () => {
       const outputFile = new File(testDirectory, 'file.txt');
       expect(outputFile.exists).toBe(false);
@@ -561,6 +590,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(outputFile.textSync()).toEqual('Hello world!');
     });
 
+    // `textSync()` is not available on web.
     itWithStorage(
       'Writes a base64 encoded string to a file reference using File.write',
       async () => {
@@ -571,6 +601,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }
     );
 
+    // `writeSync()` is not available on web.
     itWithStorage('Writes a string to a file reference using File.writeSync', async () => {
       const outputFile = new File(testDirectory, 'file.txt');
       outputFile.create();
@@ -582,14 +613,15 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(outputFile.textSync()).toBe('abc');
     });
 
-    itWithStorage('Writes a string to a file reference using File.write', async () => {
+    it('Writes a string to a file reference using File.write', async () => {
       const outputFile = new File(testDirectory, 'file_async.txt');
-      outputFile.create();
+      await outputFile.createAsync();
       await outputFile.write('0abcd');
       expect(outputFile.exists).toBe(true);
       expect(await outputFile.text()).toBe('0abcd');
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('Reads a string from a file reference', async () => {
       const outputFile = new File(testDirectory, 'file2.txt');
       outputFile.writeSync('Hello world');
@@ -600,6 +632,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(contentSync).toBe('Hello world');
     });
 
+    // The legacy `writeAsStringAsync()` and `writeSync()` are not available on web.
     describeWithStorage('Append option', () => {
       it('appends a string using legacy writeAsStringAsync', async () => {
         const fileUri = testDirectory + 'legacy-append.txt';
@@ -664,6 +697,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('Deletes a file reference', () => {
       const outputFile = new File(testDirectory, 'file3.txt');
       outputFile.writeSync('Hello world');
@@ -674,6 +708,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
 
     // write 2 tests that tests recursive directory deletion both for regular and for a saf directory
+    // `writeSync()` is not available on web.
     itWithStorage('recursively deletes a regular directory', () => {
       const parentDir = new Directory(testDirectory, 'parent');
       parentDir.create();
@@ -701,66 +736,70 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       }
     });
 
+    // On web, a `file:` uri outside `Paths.cache` and `Paths.document` has no storage, and
+    // `delete()` does nothing there.
     itWithStorage('Throws if a file does not exist', () => {
       const file = new File('file:///path/to/file');
       expect(() => file.delete()).toThrow();
     });
 
-    itWithStorage('Creates a folder', () => {
+    it('Creates a folder', async () => {
       const folder = new Directory(testDirectory, 'newFolder');
-      folder.create();
+      await folder.createAsync();
       expect(folder.exists).toBe(true);
     });
 
-    itWithStorage('Creates a folder without a slash', () => {
+    it('Creates a folder without a slash', async () => {
       const folder = new Directory(testDirectory, 'newFolder2');
-      folder.create();
+      await folder.createAsync();
       expect(folder.exists).toBe(true);
     });
 
-    itWithStorage('Creates a folder with subdirectories if intermediates is set', () => {
+    it('Creates a folder with subdirectories if intermediates is set', async () => {
       const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
-      folder.create({ intermediates: true });
+      await folder.createAsync({ intermediates: true });
       expect(folder.exists).toBe(true);
     });
 
-    itWithStorage(
-      'Throws en error while creating a folder with subdirectories if intermediates is not set',
-      () => {
-        const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
-        expect(() => folder.create()).toThrow();
-        expect(() => folder.create({ intermediates: false })).toThrow();
-        expect(folder.exists).toBe(false);
+    it('Throws en error while creating a folder with subdirectories if intermediates is not set', async () => {
+      const folder = new Directory(testDirectory, 'some', 'subdirectory', 'here');
+      for (const options of [undefined, { intermediates: false }]) {
+        let error;
+        try {
+          await folder.createAsync(options);
+        } catch (e) {
+          error = e;
+        }
+        expect(error).toBeDefined();
       }
-    );
+      expect(folder.exists).toBe(false);
+    });
 
-    itWithStorage('throws an error if the directory already exists and idempotent is false', () => {
+    it('throws an error if the directory already exists and idempotent is false', async () => {
       const directory = new Directory(testDirectory, 'test');
-      directory.create();
+      await directory.createAsync();
       let error;
       try {
-        directory.create({ idempotent: false });
+        await directory.createAsync({ idempotent: false });
       } catch (e) {
         error = e;
       }
       expect(error).toBeDefined();
     });
 
-    itWithStorage(
-      'does not throw an error if the directory already exists and idempotent is true',
-      () => {
-        const directory = new Directory(testDirectory, 'test');
-        directory.create();
-        let error;
-        try {
-          directory.create({ idempotent: true });
-        } catch (e) {
-          error = e;
-        }
-        expect(error).not.toBeDefined();
+    it('does not throw an error if the directory already exists and idempotent is true', async () => {
+      const directory = new Directory(testDirectory, 'test');
+      await directory.createAsync();
+      let error;
+      try {
+        await directory.createAsync({ idempotent: true });
+      } catch (e) {
+        error = e;
       }
-    );
+      expect(error).not.toBeDefined();
+    });
 
+    // `textSync()` is not available on web.
     itWithStorage('Creates an empty file', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
@@ -768,6 +807,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('');
     });
 
+    // `textSync()` is not available on web.
     itWithStorage('Throws an error if the file exists', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
@@ -775,6 +815,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('');
     });
 
+    // `writeSync()` is not available on web.
     itWithStorage('Overwrites a file if it exists and `overwrite` is set', () => {
       const file = new File(testDirectory, 'newFolder');
       file.create();
@@ -785,28 +826,29 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.textSync()).toBe('');
     });
 
-    itWithStorage('Deletes a folder', () => {
+    it('Deletes a folder', async () => {
       const folder = new Directory(testDirectory, 'newFolder');
-      folder.create();
+      await folder.createAsync();
       expect(folder.exists).toBe(true);
 
-      folder.delete();
+      await folder.deleteAsync();
       expect(folder.exists).toBe(false);
     });
 
-    itWithStorage('Deletes a folder containing another folder', () => {
+    it('Deletes a folder containing another folder', async () => {
       const folder = new Directory(testDirectory, 'newFolder2');
-      folder.create();
+      await folder.createAsync();
 
       const child = new Directory(folder, 'child');
-      child.create();
+      await child.createAsync();
 
       expect(folder.exists).toBe(true);
 
-      folder.delete();
+      await folder.deleteAsync();
       expect(folder.exists).toBe(false);
     });
 
+    // `copySync()` and `writeSync()` are not available on web.
     describeWithStorage('When copying a file', () => {
       it("Throws an error when it doesn't exist", () => {
         const src = new File(testDirectory, 'file.txt');
@@ -892,6 +934,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `Directory.copySync()` is not available on web.
     describeWithStorage('When copying a directory', () => {
       it('copies it to a folder', () => {
         const src = new Directory(testDirectory, 'directory');
@@ -942,6 +985,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `moveSync()` and `writeSync()` are not available on web.
     describeWithStorage('When moving a file', () => {
       it("Throws an error when it doesn't exist", () => {
         const src = new File(testDirectory, 'file.txt');
@@ -1011,6 +1055,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `rename()` is not available on web.
     describeWithStorage('When renaming a file', () => {
       it('renames a file and updates its uri and existence', () => {
         const originalFile = new File(testDirectory, 'original.txt');
@@ -1091,6 +1136,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `Directory.moveSync()` is not available on web.
     describeWithStorage('When moving a directory', () => {
       it('moves it to a folder', () => {
         const src = new Directory(testDirectory, 'directory/');
@@ -1499,6 +1545,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     }
 
+    // `Directory.rename()` is not available on web.
     describeWithStorage('When renaming a directory', () => {
       it('renames a directory and updates its uri and parent listing', () => {
         const originalDir = new Directory(testDirectory, 'oldName/');
@@ -1593,6 +1640,8 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // In the browser, these cross-origin downloads from the test hosts fail with "Failed to fetch"
+    // or time out.
     describeWithStorage('Downloads files', () => {
       let originalTimeout: number;
 
@@ -1843,6 +1892,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `digest()`, `md5`, and `creationTime` are not available on web.
     describeWithStorage('Computes file properties', () => {
       it('computes size', async () => {
         const file = new File(testDirectory, 'file.txt');
@@ -1931,6 +1981,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `writeSync()` is not available on web.
     describeWithStorage('Computes directory properties', () => {
       it('computes size', async () => {
         const dir = new Directory(testDirectory, 'directory');
@@ -1941,6 +1992,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `base64()` is not available on web.
     describeWithStorage('Returns base64', () => {
       it('gets base64 of a file', async () => {
         const src = new File(testDirectory, 'file.txt');
@@ -1950,6 +2002,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `bytesSync()` is not available on web.
     describeWithStorage('Returns bytes', () => {
       it('gets file as a Uint8Array', async () => {
         const src = new File(testDirectory, 'file.txt');
@@ -1960,21 +2013,21 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describeWithPathInfo('Returns path info', () => {
-      it('correctly if exists and is a directory', () => {
+    describe('Returns path info', () => {
+      it('correctly if exists and is a directory', async () => {
         const uri = testDirectory + 'correctly_if_exists_and_is_a_directory';
         const src = new Directory(uri);
-        src.create();
+        await src.createAsync();
         expect(Paths.info(uri)).toEqual({
           exists: true,
           isDirectory: true,
         });
       });
 
-      it('correctly if exists and is not a directory', () => {
+      it('correctly if exists and is not a directory', async () => {
         const uri = testDirectory + 'correctly_if_exists_and_is_not_a_directory.txt';
         const src = new File(uri);
-        src.create();
+        await src.createAsync();
         expect(Paths.info(uri)).toEqual({
           exists: true,
           isDirectory: false,
@@ -1990,13 +2043,13 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
-    describeWithStorage('Lists directory contents', () => {
-      it('for newly created directories', () => {
-        new File(testDirectory, 'file.txt').create();
-        new Directory(testDirectory, 'directory').create();
-        expect(new Directory(testDirectory).list()).toEqual([
-          new File(testDirectory, 'file.txt'),
-          new Directory(testDirectory, 'directory'),
+    describe('Lists directory contents', () => {
+      it('for newly created directories', async () => {
+        await new File(testDirectory, 'file.txt').createAsync();
+        await new Directory(testDirectory, 'directory').createAsync();
+        expect(new Directory(testDirectory).list().map((e) => e.uri)).toEqual([
+          new File(testDirectory, 'file.txt').uri,
+          new Directory(testDirectory, 'directory').uri,
         ]);
         expect(new Directory(testDirectory).list()[0] instanceof File).toBe(true);
       });
@@ -2051,6 +2104,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       });
     });
 
+    // `writeSync()` and `info({ md5: true })` are not available on web.
     describeWithStorage('When getting file info', () => {
       it('executes correctly', () => {
         const url = `${testDirectory}execute_correctly.txt`;
@@ -2086,21 +2140,28 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         expect(result.exists).toBe(false);
       });
     });
-    describeWithStorage('When getting directory info', () => {
-      it('executes correctly on an empty directory', () => {
+    describe('When getting directory info', () => {
+      it('executes correctly on an empty directory', async () => {
         const url = `${testDirectory}executes_correctly_on_an_empty_directory/`;
         const src = new Directory(url);
-        src.create();
+        await src.createAsync();
 
         const result = src.info();
 
         expect(result.exists).toBe(true);
-        expect(result.modificationTime).not.toBeNull();
-        expect(result.creationTime).not.toBeNull();
+        if (onWeb) {
+          // OPFS has no creation or modification time for a directory.
+          expect(result.modificationTime).toBeUndefined();
+          expect(result.creationTime).toBeUndefined();
+        } else {
+          expect(result.modificationTime).not.toBeNull();
+          expect(result.creationTime).not.toBeNull();
+        }
         expect(result.uri).toBe(url);
         expect(result.size).toBe(0);
       });
-      it('executes correctly on a non empty directory', () => {
+      // `writeSync()` is not available on web.
+      itWithStorage('executes correctly on a non empty directory', () => {
         const url = `${testDirectory}executes_correctly_on_a_non_empty_directory/`;
         const src = new Directory(url);
         src.create();
@@ -2116,19 +2177,18 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         expect(result.uri).toBe(url);
         expect(result.size).toBe(11);
       });
-      it('returns exists false if a directory does not exist', () => {
+      it('returns exists false if a directory does not exist', async () => {
         const url = `${testDirectory}returns_exists_false_if_a_file_does_not_exist`;
         const src = new Directory(url);
-        src.create();
-        src.delete();
+        await src.createAsync();
+        await src.deleteAsync();
 
         const result = src.info();
 
         expect(result.exists).toBe(false);
       });
     });
-    // On web, `slice()` returns a browser Blob with a copy of the bytes, and there is no storage
-    // to write the files to, so these specs run only on Android and iOS.
+    // `writeSync()` is not available on web, and `slice()` throws for a file in OPFS.
     describeWithStorage('File.slice() and file-backed Blobs', () => {
       const CHUNK = 64 * 1024;
 
@@ -2303,6 +2363,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     // The native copy that `blob.stream().pipeTo(file.writableStream())` takes on Android and iOS.
     // Each spec writes the same Blob through the native copy and through a forced JS path and
     // compares the files byte for byte, so the native copy cannot change what ends up in the file.
+    // `writableStream()` is not available on web.
     describeWithStorage('Piping a Blob into File.writableStream()', () => {
       function makeFile(name: string, content: string | Uint8Array): File {
         const file = new File(testDirectory, name);
@@ -2477,6 +2538,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
   });
 
+  // `open()` and `FileHandle` are not available on web.
   describeWithStorage('Exposes file handles', () => {
     it('Allows opening files', () => {
       const src = new File(testDirectory, 'file.txt');
