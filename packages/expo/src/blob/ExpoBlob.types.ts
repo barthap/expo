@@ -110,6 +110,11 @@ export type FileSinkReference = {
 export declare class ExpoBlobModule extends NativeModule {
   Blob: typeof NativeBlob;
   /**
+   * The authority of the `ExpoBlobProvider` content provider, which serves the bytes registered
+   * with `store` as `content://` URIs. Only on Android.
+   */
+  blobProviderAuthority?: string;
+  /**
    * Copies the Blob's bytes into React Native's native blob store and returns the assigned blob id.
    */
   store(blob: NativeBlob): string;

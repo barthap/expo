@@ -9,3 +9,7 @@ export function storeBlobInReactNativeBlobStore(_blob: Blob): string {
 export function releaseBlobFromReactNativeBlobStore(_blobId: string): void {
   throw new UnavailabilityError('ExpoBlob', 'releaseBlobFromReactNativeBlobStore');
 }
+
+export function getExpoBlobUrlPrefix(): string | null {
+  return null;
+}

@@ -143,22 +143,95 @@ describe('URL.createObjectURL with other Blobs', () => {
   });
 });
 
-describe('URL.createObjectURL without blob URL constants', () => {
-  it('names the Android BlobProvider setup in the error', () => {
-    // On Android, React Native's BlobModule exports no constants unless the app registers
-    // `BlobProvider` with a `blob_provider_authority` string. The prefix is resolved once per
-    // module instance, so use a fresh `url.ts`.
-    const nativeModuleProxy = (globalThis as any).nativeModuleProxy;
-    (globalThis as any).nativeModuleProxy = { BlobModule: { getConstants: () => ({}) } };
-    try {
-      jest.isolateModules(() => {
-        const { URL: IsolatedURL } = require('../url') as typeof import('../url');
-        expect(() => IsolatedURL.createObjectURL(new Blob(['hello']))).toThrow(
-          /BlobProvider.*blob_provider_authority/
-        );
+// On Android, the ExpoBlob module exports the authority of the `expo` package's own
+// ExpoBlobProvider, which serves the store over content:// without any app manifest entry.
+// The constant is read when `expo/blob` loads its native module, so these tests load fresh
+// copies of the mock, `expo/blob` and `url.ts` with the constant set.
+type AndroidModules = {
+  URL: typeof URL;
+  Blob: typeof Blob;
+  store: typeof reactNativeBlobStore;
+};
+function withAndroidModules(
+  test: (modules: AndroidModules) => void,
+  reactNativeConstants: object = {
+    BLOB_URI_SCHEME: 'content',
+    BLOB_URI_HOST: 'dev.expo.test.blobs',
+  }
+) {
+  const nativeModuleProxy = (globalThis as any).nativeModuleProxy;
+  (globalThis as any).nativeModuleProxy = {
+    BlobModule: { getConstants: () => reactNativeConstants },
+  };
+  try {
+    jest.isolateModules(() => {
+      const mock = require('../../../mocks/ExpoBlob');
+      mock.blobProviderAuthority = 'dev.expo.test.ExpoBlobProvider';
+      test({
+        URL: (require('../url') as typeof import('../url')).URL,
+        Blob: (require('../../blob') as typeof import('../../blob')).Blob,
+        store: mock.reactNativeBlobStore,
       });
-    } finally {
-      (globalThis as any).nativeModuleProxy = nativeModuleProxy;
-    }
+    });
+  } finally {
+    (globalThis as any).nativeModuleProxy = nativeModuleProxy;
+  }
+}
+
+const CONTENT_URL = /^content:\/\/dev\.expo\.test\.ExpoBlobProvider\/([^?]+)\?offset=0&size=(\d+)$/;
+
+describe('URL.createObjectURL with the Android content provider', () => {
+  it('serves Expo Blobs from the content provider', () => {
+    withAndroidModules(({ URL, Blob, store }) => {
+      const url = URL.createObjectURL(new Blob(['hello']));
+
+      const match = CONTENT_URL.exec(url);
+      expect(match).not.toBeNull();
+      expect(match![2]).toBe('5');
+      // The provider resolves the last path segment in React Native's store
+      expect(new TextDecoder().decode(store.get(decodeURIComponent(match![1]!)))).toBe('hello');
+    });
+  });
+
+  it("keeps React Native's own prefix for React Native Blobs", () => {
+    withAndroidModules(({ URL }) => {
+      // Those ids are served by React Native's BlobProvider, which the app registered
+      const url = URL.createObjectURL({
+        data: { blobId: 'rn-blob-id', offset: 0, size: 3 },
+        size: 3,
+      } as any);
+
+      expect(url).toBe('content://dev.expo.test.blobs/rn-blob-id?offset=0&size=3');
+    });
+  });
+
+  it('revokes URLs of the content provider', () => {
+    withAndroidModules(({ URL, Blob, store }) => {
+      const url = URL.createObjectURL(new Blob(['hello']));
+      const blobId = decodeURIComponent(CONTENT_URL.exec(url)![1]!);
+
+      URL.revokeObjectURL(url);
+
+      expect(store.has(blobId)).toBe(false);
+    });
+  });
+});
+
+describe('URL.createObjectURL without blob URL constants', () => {
+  // On Android, React Native's BlobModule exports no constants unless the app registers
+  // `BlobProvider` with a `blob_provider_authority` string.
+  it('still serves Expo Blobs through the content provider', () => {
+    withAndroidModules(({ URL, Blob }) => {
+      expect(URL.createObjectURL(new Blob(['hello']))).toMatch(CONTENT_URL);
+    }, {});
+  });
+
+  it('names the Android BlobProvider setup in the error for React Native Blobs', () => {
+    withAndroidModules(({ URL }) => {
+      const rnBlob = { data: { blobId: 'rn-blob-id', offset: 0, size: 3 }, size: 3 };
+      expect(() => URL.createObjectURL(rnBlob as any)).toThrow(
+        /BlobProvider.*blob_provider_authority/
+      );
+    }, {});
   });
 });

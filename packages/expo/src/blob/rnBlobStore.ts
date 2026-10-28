@@ -25,3 +25,14 @@ export function storeBlobInReactNativeBlobStore(blob: Blob): string {
 export function releaseBlobFromReactNativeBlobStore(blobId: string): void {
   NativeBlobModule.release(blobId);
 }
+
+/**
+ * Returns the prefix of the `content://` URIs that the `expo` package's own `ExpoBlobProvider`
+ * serves from React Native's native blob store on Android, or `null` on iOS, where
+ * React Native's `blob:` URLs are used.
+ * @hidden
+ */
+export function getExpoBlobUrlPrefix(): string | null {
+  const authority = NativeBlobModule.blobProviderAuthority;
+  return typeof authority === 'string' ? `content://${authority}/` : null;
+}

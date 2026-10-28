@@ -4,4 +4,5 @@ export { isBlobLike } from './utils';
 export {
   storeBlobInReactNativeBlobStore,
   releaseBlobFromReactNativeBlobStore,
+  getExpoBlobUrlPrefix,
 } from './rnBlobStore';
