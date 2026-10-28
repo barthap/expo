@@ -394,19 +394,47 @@ try {
 
 ## Web support
 
-On web, `expo-file-system` has no persistent storage yet, so files cannot be created or written. `File`, `Directory`, and `Paths` still work for reading files, picking and downloading them, and building paths.
+On web, files and directories in `Paths.cache` and `Paths.document` are stored in the browser's [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) (OPFS), under `expo-file-system/cache` and `expo-file-system/document`. They stay there across page reloads. Other files, such as picked files and `https:` URLs, are not stored: the module reads them from memory or with `fetch()`, as described below.
 
-- A `File` from `File.pickFileAsync()`, `File.downloadFileAsync()`, or `File.fromWebFile()` holds its data in memory. It is also a browser [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File), so you can pass it directly to `fetch()` or `FormData`. Its `uri` is a `blob:` URL, and `new File(file.uri)` returns a file with the same data. The data stays in memory until you call `delete()`, which also revokes the URL.
+The browser only offers asynchronous access to OPFS, which changes how some members work on web:
+
+- Call `await Paths.ready()` once at startup. It reads the names, sizes, and modification times of the stored files into memory, so that `exists`, `size`, `lastModified`, `list()`, `info()`, and `Paths.info()` can answer synchronously. Until it resolves, they throw an `ERR_NOT_INITIALIZED` error. On Android, iOS, and tvOS, `Paths.ready()` resolves at once.
+- Use `createAsync()` and `deleteAsync()` of `File` and `Directory`, and `createFileAsync()` and `createDirectoryAsync()` of `Directory`. The sync `create()`, `delete()`, `createFile()`, `createDirectory()`, `writeSync()`, `textSync()`, `bytesSync()`, `copySync()`, `moveSync()`, and `rename()` throw an `UnavailabilityError` on web, because a sync call cannot wait for the browser. The exception is `File.delete()` on a file that is not stored in OPFS: it still releases the data of the file and revokes its `blob:` URL. The `*Async` methods work on every platform: on Android, iOS, and tvOS, they call the sync methods.
+- `write()`, `copy()`, `move()`, and `File.downloadFileAsync()` write to OPFS when the destination is in `Paths.cache` or `Paths.document`. A write rejects with `ERR_FILE_LOCKED` while another write to the same file is open, and with `ERR_QUOTA_EXCEEDED` when the storage quota of the site is used up. Use [`navigator.storage.estimate()`](https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/estimate) to see how much space is left.
+- `info()` has no `creationTime`, because OPFS does not store it, and `info({ md5: true })` throws.
+- A stored `File` does not hold its data in memory, so `slice()` and `toWebFile()` throw, and `FormData` or `fetch()` would send 0 bytes for it. Read the data first: `new globalThis.File([await file.bytes()], file.name, { type: file.type })`.
+- `Paths.cache` is as persistent as `Paths.document`: the module never removes files from it. The browser can still clear all storage of the site, for example when the device runs low on space. A page can ask the browser to keep the storage with `navigator.storage.persist()`.
+
+OPFS needs a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts) (HTTPS or `localhost`) and a browser that supports [`FileSystemFileHandle.createWritable()`](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemFileHandle/createWritable). Without them, `Paths.cache` and `Paths.document` exist but hold nothing, and every write to them rejects with `ERR_OPFS_UNAVAILABLE`.
+
+```ts
+import { Directory, File, Paths } from 'expo-file-system';
+
+await Paths.ready();
+
+const notes = new Directory(Paths.document, 'notes');
+await notes.createAsync({ idempotent: true });
+
+const file = new File(notes, 'today.txt');
+await file.write('Buy milk');
+console.log(file.exists, file.size); // true 8
+console.log(await file.text()); // Buy milk
+
+await file.deleteAsync();
+```
+
+Files that are not stored in OPFS work like this:
+
+- A `File` from `File.pickFileAsync()`, `File.downloadFileAsync()` into a directory outside `Paths.cache` and `Paths.document`, or `File.fromWebFile()` holds its data in memory. It is also a browser [`File`](https://developer.mozilla.org/en-US/docs/Web/API/File), so you can pass it directly to `fetch()` or `FormData`. Its `uri` is a `blob:` URL, and `new File(file.uri)` returns a file with the same data. The data stays in memory until you call `delete()`, which also revokes the URL. To store it, call `await file.move(new Directory(Paths.document))`.
 - A `File` created from any other URI, such as a `data:` or `https:` URL, only has the URI. `text()`, `bytes()`, `arrayBuffer()`, `json()`, and `stream()` read it with `fetch()`. `size` and `slice()` throw, `lastModified` is `null`, and `exists` is `true` only for `data:` URIs.
 - `File.pickFileAsync()` opens the browser file dialog, so it must be called from a user gesture, such as a click handler. In Chrome 37 to 112 and Safari 15.4 to 16.3, which do not fire the `cancel` event on file inputs, the promise may never settle when the user closes the dialog.
-- `File.downloadFileAsync()` downloads into memory and ignores the location of the destination.
-- `Paths.cache`, `Paths.document`, and `Paths.bundle` are placeholder directories (`file:///cache/`, `file:///document/`, and `file:///bundle/`). They exist, but nothing can be stored in them yet.
+- `Paths.bundle` is the placeholder directory `file:///bundle/`. It exists, but nothing can be stored in it.
 
 The following members are not available on web and throw or reject with an `UnavailabilityError`:
 
-- `File`: `write()`, `writeSync()`, `writableStream()`, `create()`, `copy()`, `copySync()`, `move()`, `moveSync()`, `rename()`, `open()`, `textSync()`, `bytesSync()`, `base64()`, `base64Sync()`, `digest()`, `info()`, `md5`, `modificationTime`, `creationTime`, `contentUri`, `upload()`, `createUploadTask()`, `File.createDownloadTask()`, `watch()`, `canPreview()`, and `preview()`.
-- `Directory`: `create()`, `createFile()`, `createDirectory()`, `delete()`, `copy()`, `copySync()`, `move()`, `moveSync()`, `rename()`, `list()`, `info()`, `size`, `watch()`, and `Directory.pickDirectoryAsync()`.
-- `Paths`: `info()`, `totalDiskSpace`, and `availableDiskSpace`.
+- `File`: `writableStream()`, `open()`, `base64()`, `base64Sync()`, `digest()`, `md5`, `modificationTime`, `creationTime`, `contentUri`, `upload()`, `createUploadTask()`, `File.createDownloadTask()`, `watch()`, `canPreview()`, `preview()`, and the sync methods listed above.
+- `Directory`: `copy()`, `copySync()`, `move()`, `moveSync()`, `rename()`, `watch()`, `Directory.pickDirectoryAsync()`, and the sync methods listed above.
+- `Paths`: `totalDiskSpace` and `availableDiskSpace`.
 
 ## API
 
