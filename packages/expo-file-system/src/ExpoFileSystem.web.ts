@@ -606,7 +606,7 @@ export default {
     );
   },
   pickFileAsync,
-  // Fills the in-memory index of the OPFS storage. Nothing calls it yet, and `Paths.cache` and
+  // `Paths.ready()`: fills the in-memory index of the OPFS storage. `Paths.cache` and
   // `Paths.document` do not use the storage yet.
   ready: () => getOpfsIndex().ready(),
   info: () => {

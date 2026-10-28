@@ -43,6 +43,8 @@ declare class ExpoFileSystemModule extends NativeModule<FileSystemEvents> {
   cacheDirectory: string;
   bundleDirectory: string;
   appleSharedContainers?: Record<string, string>;
+  /** Web only: fills the in-memory index of the OPFS storage. Native modules do not have it. */
+  ready?(): Promise<void>;
 }
 
 export default requireNativeModule<ExpoFileSystemModule>('FileSystem');

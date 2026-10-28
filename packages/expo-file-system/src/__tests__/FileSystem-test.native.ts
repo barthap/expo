@@ -35,6 +35,10 @@ describe('expo-file-system new API', () => {
     expect(bundle.uri).toBe('file:///mock/bundle/');
   });
 
+  it('Paths.ready() resolves without a native ready(), so shared startup code can await it', async () => {
+    await expect(Paths.ready()).resolves.toBeUndefined();
+  });
+
   it('Paths.totalDiskSpace and availableDiskSpace return numbers', () => {
     expect(typeof Paths.totalDiskSpace).toBe('number');
     expect(typeof Paths.availableDiskSpace).toBe('number');

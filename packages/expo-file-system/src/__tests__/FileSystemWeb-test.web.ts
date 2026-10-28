@@ -653,6 +653,11 @@ describe('Directory and Paths on web', () => {
     expect(() => dir.watch(() => {})).toThrow(ERR_UNAVAILABLE);
   });
 
+  it('Paths.ready() resolves at once when the browser has no OPFS', async () => {
+    // Node has no `isSecureContext` or `navigator.storage`, like a page served over plain http.
+    await expect(Paths.ready()).resolves.toBeUndefined();
+  });
+
   it('throws for disk space and path info, and has no shared containers', () => {
     expect(() => Paths.totalDiskSpace).toThrow(ERR_UNAVAILABLE);
     expect(() => Paths.availableDiskSpace).toThrow(ERR_UNAVAILABLE);
