@@ -36,6 +36,13 @@ class BlobModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoBlob")
 
+    // The authority of `ExpoBlobProvider`, which serves `URL.createObjectURL` URIs. It matches
+    // `${applicationId}.ExpoBlobProvider` in the manifest, because the package name is the application id.
+    Constant("blobProviderAuthority") {
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      "${context.packageName}.ExpoBlobProvider"
+    }
+
     // Registers a copy of the Blob's bytes in React Native's blob store. They stay there until `release` is called.
     Function("store") { blob: Blob ->
       reactBlobModule.store(blob.bytes())

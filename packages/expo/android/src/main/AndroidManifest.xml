@@ -1,3 +1,6 @@
-<manifest>
-
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Serves the bytes of `URL.createObjectURL` as content:// URIs -->
+    <provider android:name="expo.modules.blob.ExpoBlobProvider" android:authorities="${applicationId}.ExpoBlobProvider" android:exported="false" android:grantUriPermissions="true" />
+  </application>
 </manifest>
