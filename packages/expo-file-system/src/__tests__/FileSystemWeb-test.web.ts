@@ -619,10 +619,11 @@ describe('Directory and Paths on web', () => {
 
   it('treats everything below the roots as missing', () => {
     const dir = new Directory(Paths.cache, 'sub');
-    expect(dir.uri).toBe('file:///cache/sub');
+    // Like on native, a directory uri ends with a slash.
+    expect(dir.uri).toBe('file:///cache/sub/');
     expect(dir.exists).toBe(false);
     expect(dir.name).toBe('sub');
-    expect(dir.parentDirectory.uri).toBe('file:///cache');
+    expect(dir.parentDirectory.uri).toBe('file:///cache/');
   });
 
   it('throws for directory operations', async () => {

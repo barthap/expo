@@ -71,6 +71,10 @@ export function asUrl(url: string | URL) {
   try {
     const newUrl = new URL(url);
     newUrl.hash = '';
+    // The URL standard drops a `localhost` host from `file:` URLs, but Chrome keeps it.
+    if (newUrl.protocol === 'file:' && newUrl.hostname === 'localhost') {
+      newUrl.hostname = '';
+    }
     return newUrl;
   } catch (error) {
     return null;

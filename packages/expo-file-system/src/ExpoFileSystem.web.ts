@@ -2,6 +2,7 @@ import { CodedError, UnavailabilityError } from 'expo-modules-core';
 
 import type { PickFileOptions } from './File.types';
 import type { DownloadOptions } from './NetworkTasks.types';
+import { normalizeFileUri } from './internal/opfsPaths';
 import { PathUtilities } from './pathUtilities';
 
 // Web has no file system to write to. Files are either snapshot-backed (they hold the data of
@@ -122,10 +123,12 @@ class FileSystemFile extends globalThis.File {
     return new this(registerBlob(webFile, webFile.name));
   }
 
+  // Like native, a `file:` uri is cleaned up here and `validatePath()` has nothing left to do.
   constructor(uri: string) {
-    super(...superArgsFor(uri));
-    this.#uri = uri;
-    this.#isSnapshot = blobRegistry.has(uri);
+    const normalizedUri = normalizeFileUri(uri, 'file');
+    super(...superArgsFor(normalizedUri));
+    this.#uri = normalizedUri;
+    this.#isSnapshot = blobRegistry.has(normalizedUri);
   }
 
   get uri(): string {
@@ -333,7 +336,7 @@ class FileSystemDirectory {
   readonly #uri: string;
 
   constructor(uri: string) {
-    this.#uri = uri;
+    this.#uri = normalizeFileUri(uri, 'directory');
   }
 
   get uri(): string {
