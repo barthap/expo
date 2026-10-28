@@ -99,9 +99,9 @@ const expoBlobUrls = new Map<string, string>();
  * On Android, the URL of an Expo `Blob` is a `content://<applicationId>.ExpoBlobProvider/<id>?offset=0&size=<n>`
  * URI, served by a content provider that the `expo` package declares, so it needs no manifest
  * changes. Other apps can read it only when the app grants them access, for example with
- * `Intent.FLAG_GRANT_READ_URI_PERMISSION`. The global `fetch` does not load these URIs on Android
- * yet. React Native's own `Blob` keeps React Native's `content://` URIs, which need React Native's
- * `BlobProvider` in your app's `AndroidManifest.xml`:
+ * `Intent.FLAG_GRANT_READ_URI_PERMISSION`. The global `fetch` loads it too. React Native's own
+ * `Blob` keeps React Native's `content://` URIs, which need React Native's `BlobProvider` in your
+ * app's `AndroidManifest.xml`:
  *
  * ```xml
  * <manifest>

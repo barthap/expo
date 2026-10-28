@@ -129,7 +129,7 @@ URL.revokeObjectURL(url);
 
 - The bytes stay in memory until `URL.revokeObjectURL()` is called, even after the blob is garbage collected. The URL stops working when the app restarts.
 - The bytes are copied when the URL is created. For a blob made from a file, such as `new Blob([file])` with a `File` from `expo-file-system`, later changes to the file do not show in the URL, and a missing file throws. Each file part is limited to 2 GiB.
-- On Android, the URL is a `content://` URI served by a content provider of the `expo` package. Other apps can read it only when your app grants them access, for example with `Intent.FLAG_GRANT_READ_URI_PERMISSION`. The global `fetch` (which is `expo/fetch` in Expo apps) does not load `content://` URIs on Android.
+- On Android, the URL is a `content://` URI served by a content provider of the `expo` package. Other apps can read it only when your app grants them access, for example with `Intent.FLAG_GRANT_READ_URI_PERMISSION`. The global `fetch` (which is `expo/fetch` in Expo apps) loads it too.
 - On iOS, the URL is a `blob:` URL. The global `fetch` and native code that uses `URLSession.shared` can load it.
 
 ## API
