@@ -210,36 +210,52 @@ function useTestRunner() {
       },
     });
 
+    function reportFailure(
+      fullName: string,
+      failedExpectations: JasmineResult['failedExpectations']
+    ) {
+      failedCountRef.current++;
+      const lines = [`[FAIL] ${fullName}`];
+      failedExpectations.forEach(({ message }) => {
+        lines.push(`       ${message}`);
+      });
+      const output = lines.join('\n');
+      console.warn(output);
+      if (ExponentTest && ExponentTest.log) {
+        ExponentTest.log(output);
+      }
+      resultsRef.current += `+++ ${fullName}\n`;
+      failuresRef.current += `+++ ${fullName}\n`;
+      failedExpectations.forEach(({ message }) => {
+        resultsRef.current += `${message}\n`;
+        failuresRef.current += `${message}\n`;
+      });
+    }
+
     jasmineEnv.addReporter({
       specDone(result: JasmineResult) {
         if (cancelledRef.current) {
           return;
         }
-        if (result.status === 'passed' || result.status === 'failed') {
-          const grouping = result.status === 'passed' ? '---' : '+++';
-          resultsRef.current += `${grouping} ${result.fullName}\n`;
+        if (result.status === 'passed') {
+          resultsRef.current += `--- ${result.fullName}\n`;
+          passedCountRef.current++;
+        }
+        if (result.status === 'failed') {
+          reportFailure(result.fullName, result.failedExpectations);
+        }
+      },
 
-          if (result.status === 'passed') {
-            passedCountRef.current++;
-          }
-
-          if (result.status === 'failed') {
-            failedCountRef.current++;
-            const lines = [`[FAIL] ${result.fullName}`];
-            result.failedExpectations.forEach(({ message }) => {
-              lines.push(`       ${message}`);
-            });
-            const output = lines.join('\n');
-            console.warn(output);
-            if (ExponentTest && ExponentTest.log) {
-              ExponentTest.log(output);
-            }
-            failuresRef.current += `${grouping} ${result.fullName}\n`;
-            result.failedExpectations.forEach(({ message }) => {
-              resultsRef.current += `${message}\n`;
-              failuresRef.current += `${message}\n`;
-            });
-          }
+      // An error thrown outside a spec (in a `describe` body, `beforeAll`, or `afterAll`) is
+      // reported on the suite, not on a spec. A `describe` body that throws also drops every spec
+      // declared after the throw, so without this the run would end with fewer specs and no
+      // failure.
+      suiteDone(result: JasmineResult) {
+        if (cancelledRef.current) {
+          return;
+        }
+        if (result.failedExpectations.length > 0) {
+          reportFailure(result.fullName, result.failedExpectations);
         }
       },
 
@@ -247,9 +263,13 @@ function useTestRunner() {
         runStartTimeRef.current = performance.now();
       },
 
-      jasmineDone() {
+      jasmineDone(doneInfo: { failedExpectations?: JasmineResult['failedExpectations'] }) {
         if (cancelledRef.current) {
           return;
+        }
+        // Errors from a top-level `beforeAll` or `afterAll` (outside any `describe`).
+        if (doneInfo.failedExpectations?.length) {
+          reportFailure('Top-level beforeAll/afterAll', doneInfo.failedExpectations);
         }
         const totalDuration = performance.now() - runStartTimeRef.current;
         const result = {
@@ -321,10 +341,19 @@ function useTestRunner() {
     (async () => {
       for (const m of selectedModules) {
         currentModuleRef.current = m.name;
-        await m.test(jasmine, {
-          setPortalChild,
-          cleanupPortal,
-        });
+        try {
+          await m.test(jasmine, {
+            setPortalChild,
+            cleanupPortal,
+          });
+        } catch (error) {
+          // A module whose `test` function throws would otherwise stop the run before it starts.
+          jasmine.describe(m.name, () => {
+            jasmine.it('declares its specs', () => {
+              throw error;
+            });
+          });
+        }
       }
       currentModuleRef.current = null;
       jasmineEnv.execute().catch((error: unknown) => {
