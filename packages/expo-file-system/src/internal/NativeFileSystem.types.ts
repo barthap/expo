@@ -92,23 +92,23 @@ export declare class NativeFileSystemDirectory {
   createDirectory(name: string): PublicDirectory;
 
   /**
-   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `create()`.
+   * @hidden The shared `Directory` documents it. On Android, iOS, and tvOS, it calls `create()`.
    */
   createAsync(options?: DirectoryCreateOptions): Promise<void>;
 
   /**
-   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `delete()`.
+   * @hidden The shared `Directory` documents it. On Android, iOS, and tvOS, it calls `delete()`.
    */
   deleteAsync(): Promise<void>;
 
   /**
-   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `createFile()`.
+   * @hidden The shared `Directory` documents it. On Android, iOS, and tvOS, it calls `createFile()`.
    */
   createFileAsync(name: string, mimeType: string | null): Promise<PublicFile>;
 
   /**
-   * @hidden The shared `Directory` documents it. On Android and iOS, it calls
-   * `createDirectory()`.
+   * @hidden The shared `Directory` documents it. On Android, iOS, and tvOS, it
+   * calls `createDirectory()`.
    */
   createDirectoryAsync(name: string): Promise<PublicDirectory>;
 
@@ -180,22 +180,22 @@ export declare class NativeFileSystemDirectory {
   /**
    * Retrieves an object containing properties of a directory.
    *
+   * > **Note:** On web, it works for a directory in `Paths.cache` or `Paths.document` after
+   * > `await Paths.ready()`, and throws for any other directory. The result has no `creationTime`
+   * > and no `modificationTime`, because the Origin Private File System does not store them for a
+   * > directory.
+   *
    * @throws Error If the application does not have read access to the directory, or if the path does not point to a directory (e.g., it points to a file).
-   *
    * @returns An object with directory metadata (for example, size, creation date, and so on).
-   *
-   * @platform android
-   * @platform ios
-   * @platform tvos
    */
   info(): DirectoryInfo;
 
   /**
    * A size of the directory in bytes. Null if the directory does not exist, or it cannot be read.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, for a directory in `Paths.cache` or `Paths.document`, it is the sum of the
+   * > sizes of the files inside it. Reading it throws an `ERR_NOT_INITIALIZED` error until
+   * > `await Paths.ready()` resolves. It throws for any other directory.
    */
   size: number | null;
 
@@ -236,8 +236,9 @@ export declare class NativeFileSystemFile {
   /**
    * Retrieves text from the file.
    *
-   * > **Note:** On web, a file that only has a URI is read with `fetch()`, so the promise rejects
-   * > when the request fails.
+   * > **Note:** On web, a file in `Paths.cache` or `Paths.document` is read from the Origin Private
+   * > File System on every call. A file that only has a URI is read with `fetch()`, so the promise
+   * > rejects when the request fails.
    * @returns A promise that resolves to the contents of the file as string.
    */
   text(): Promise<string>;
@@ -275,8 +276,9 @@ export declare class NativeFileSystemFile {
   /**
    * Retrieves byte content of the entire file.
    *
-   * > **Note:** On web, a file that only has a URI is read with `fetch()`, so the promise rejects
-   * > when the request fails.
+   * > **Note:** On web, a file in `Paths.cache` or `Paths.document` is read from the Origin Private
+   * > File System on every call. A file that only has a URI is read with `fetch()`, so the promise
+   * > rejects when the request fails.
    * @returns A promise that resolves to the contents of the file as a `Uint8Array`.
    */
   bytes(): Promise<Uint8Array<ArrayBuffer>>;
@@ -293,11 +295,17 @@ export declare class NativeFileSystemFile {
 
   /**
    * Writes content to the file.
-   * @param content The content to write into the file.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, it writes a file in `Paths.cache` or `Paths.document` to the Origin Private
+   * > File System and creates the file when it is missing. Its parent directory must exist. It
+   * > rejects for any other file.
+   * >
+   * > A write rejects with `ERR_FILE_LOCKED` while another write to the same file is open (browsers
+   * > that ignore the exclusive lock let the last write win instead), with `ERR_QUOTA_EXCEEDED` when
+   * > the storage quota of the origin is used up (see `navigator.storage.estimate()`), and with
+   * > `ERR_OPFS_UNAVAILABLE` when the browser has no OPFS, for example on a page that is not served
+   * > over HTTPS or from `localhost`.
+   * @param content The content to write into the file.
    */
   write(content: string | Uint8Array | ArrayBuffer, options?: FileWriteOptions): Promise<void>;
 
@@ -325,13 +333,14 @@ export declare class NativeFileSystemFile {
   delete(): void;
 
   /**
-   * Retrieves an object containing properties of a file
+   * Retrieves an object containing properties of a file.
+   *
+   * > **Note:** On web, it works for a file in `Paths.cache` or `Paths.document` after
+   * > `await Paths.ready()`, and throws for any other file. The result has no `creationTime`,
+   * > because the Origin Private File System does not store it, and `info({ md5: true })` throws.
+   *
    * @throws Error If the application does not have read access to the file, or if the path does not point to a file (for example, it points to a directory).
    * @returns An object with file metadata (for example, size, creation date, and so on).
-   *
-   * @platform android
-   * @platform ios
-   * @platform tvos
    */
   info(options?: InfoOptions): FileInfo;
 
@@ -371,21 +380,22 @@ export declare class NativeFileSystemFile {
   create(options?: FileCreateOptions): void;
 
   /**
-   * @hidden The shared `File` documents it. On Android and iOS, it calls `create()`.
+   * @hidden The shared `File` documents it. On Android, iOS, and tvOS, it calls `create()`.
    */
   createAsync(options?: FileCreateOptions): Promise<void>;
 
   /**
-   * @hidden The shared `File` documents it. On Android and iOS, it calls `delete()`.
+   * @hidden The shared `File` documents it. On Android, iOS, and tvOS, it calls `delete()`.
    */
   deleteAsync(): Promise<void>;
 
   /**
    * Copies a file.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, the destination must be in `Paths.cache` or `Paths.document`, and it is
+   * > written to the Origin Private File System. The source can be a file stored there, a file
+   * > that holds its data, or a file that only has a URI, which is read with `fetch()`. The write
+   * > rejects like `write()` does.
    */
   copy(destination: PublicDirectory | PublicFile, options?: RelocationOptions): Promise<void>;
 
@@ -399,11 +409,14 @@ export declare class NativeFileSystemFile {
   copySync(destination: PublicDirectory | PublicFile, options?: RelocationOptions): void;
 
   /**
-   * Moves a directory. Updates the `uri` property that now points to the new location.
+   * Moves a file. Updates the `uri` property that now points to the new location.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, the destination must be in `Paths.cache` or `Paths.document`. The file is
+   * > copied there and the source is removed: a stored file is deleted, and a file that holds its
+   * > data, such as one from `File.pickFileAsync()`, releases it and revokes its `blob:` URL. A file
+   * > that only has a URI cannot be moved. After the move, `name` is the name of the destination.
+   * > When the source held its data, only the browser `File` slots of the instance, which
+   * > `FormData` and `fetch()` read, keep the old data and name.
    */
   move(destination: PublicDirectory | PublicFile, options?: RelocationOptions): Promise<void>;
 
@@ -473,8 +486,10 @@ export declare class NativeFileSystemFile {
   /**
    * A size of the file in bytes. 0 if the file does not exist, or it cannot be read.
    *
-   * > **Note:** On web, reading `size` throws for a file that only has a URI, because its data is
-   * > not loaded. Read the data with `bytes()` to get its length.
+   * > **Note:** On web, for a file in `Paths.cache` or `Paths.document`, it is the size stored in
+   * > the Origin Private File System, and reading it throws an `ERR_NOT_INITIALIZED` error until
+   * > `await Paths.ready()` resolves. Reading `size` throws for a file that only has a URI, because
+   * > its data is not loaded. Read the data with `bytes()` to get its length.
    */
   size: number;
   /**
@@ -498,7 +513,9 @@ export declare class NativeFileSystemFile {
   /**
    * A last modification time of the file expressed in milliseconds since the epoch. Returns a `null` if the file does not exist, or if it cannot be read.
    *
-   * > **Note:** On web, it is `null` for a file that only has a URI.
+   * > **Note:** On web, for a file in `Paths.cache` or `Paths.document`, it is the time stored in the
+   * > Origin Private File System, and reading it throws an `ERR_NOT_INITIALIZED` error until
+   * > `await Paths.ready()` resolves. It is `null` for a file that only has a URI.
    */
   lastModified: number | null;
   /**
@@ -515,7 +532,11 @@ export declare class NativeFileSystemFile {
    * > **Note:** On web, a file that holds its data has the type of that data, and a `data:` URI has
    * > the MIME type written in the URI. Other files that only have a URI have an empty string until
    * > they are read, and then the `Content-Type` of the last successful response, including
-   * > parameters such as `charset`.
+   * > parameters such as `charset`. A file in `Paths.cache` or `Paths.document` has an empty string
+   * > until it is read, and then the type that the browser reports for the stored file.
+   *
+   * On Android, iOS, and tvOS, a file at a `file:` path reports a type from its extension without a
+   * read.
    */
   type: string;
   /**

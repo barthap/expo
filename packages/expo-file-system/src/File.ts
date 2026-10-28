@@ -67,6 +67,10 @@ function fileRangePart(reference: FileRangeReference): BlobPart {
  * > `createAsync()` and `deleteAsync()`. Any other `File` either holds its data in memory, when it
  * > comes from `File.fromWebFile()`, `File.pickFileAsync()`, or `File.downloadFileAsync()`, or only
  * > has a URI, such as a `blob:`, `data:`, or `https:` URL, and reads it with `fetch()`.
+ * >
+ * > A `File` in `Paths.cache` or `Paths.document` does not hold its data in the browser `File`
+ * > slots, so `FormData` and `fetch()` send 0 bytes for it. Read the data first and pass a browser
+ * > `File` instead: `new globalThis.File([await file.bytes()], file.name, { type: file.type })`.
  * @example
  * ```ts
  * const file = new File(Paths.cache, "subdirName", "file.txt");
@@ -155,7 +159,9 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
    * > ignored. For a directory destination, the name comes from the `Content-Disposition` header,
    * > then from the last segment of an `http:` or `https:` URL, and is `download` when neither has
    * > one. `onProgress` is called once with the final size, and only when the downloaded file is not
-   * > empty, and a non-2xx response rejects with an error that includes the status code.
+   * > empty, and a non-2xx response rejects with an error that includes the status code. Without
+   * > OPFS in the browser, a destination in `Paths.cache` or `Paths.document` rejects with
+   * > `ERR_OPFS_UNAVAILABLE` before the request.
    *
    * @param url - The URL of the file to download.
    * @param destination - The destination directory or file. If a directory is provided, the resulting filename will be determined based on the response headers.

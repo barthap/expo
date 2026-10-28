@@ -46,11 +46,12 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
   /**
    * Lists the contents of a directory.
    * Calling this method if the parent directory does not exist will throw an error.
-   * @returns An array of `Directory` and `File` instances.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, it lists a directory in `Paths.cache` or `Paths.document` from the Origin
+   * > Private File System, and throws an `ERR_NOT_INITIALIZED` error until `await Paths.ready()`
+   * > resolves. It throws for any other directory.
+   *
+   * @returns An array of `Directory` and `File` instances.
    */
   override list(): (Directory | File)[] {
     return super
@@ -136,6 +137,9 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
    * promise, so code that runs on every platform can `await` it. On Android, iOS, and tvOS, it
    * calls `createFile()`.
    *
+   * > **Note:** On web, it works for a directory in `Paths.cache` or `Paths.document`, like
+   * > `createAsync()` on the new file, and rejects for any other directory.
+   *
    * @param name The name of the file.
    * @param mimeType The MIME type of the file. Only Android uses it, for SAF `content://`
    * directories.
@@ -152,6 +156,9 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
    * Creates a directory with the given name in this directory, like `createDirectory()`, and
    * returns a promise, so code that runs on every platform can `await` it. On Android, iOS, and
    * tvOS, it calls `createDirectory()`.
+   *
+   * > **Note:** On web, it works for a directory in `Paths.cache` or `Paths.document`, like
+   * > `createAsync()` on the new directory, and rejects for any other directory.
    *
    * @param name The name of the directory.
    * @returns A promise that resolves to the created directory.

@@ -11,6 +11,11 @@ export class Paths extends PathUtilities {
    * > System (OPFS) of the browser, like the files in `Paths.document`. Call `await Paths.ready()`
    * > before you read `exists`, `size`, `lastModified`, `list()`, or `info()` of anything inside
    * > it. Without OPFS in the browser, it exists, holds nothing, and writes reject.
+   * >
+   * > The module never removes files from it on web, so it keeps them as long as `Paths.document`
+   * > does. The browser can still clear the whole storage of the origin, for example when the
+   * > device runs low on space or the user clears the site data. A page can ask the browser to
+   * > keep the storage with `navigator.storage.persist()`.
    */
   static get cache() {
     return new Directory(ExpoFileSystem.cacheDirectory);
@@ -100,9 +105,8 @@ export class Paths extends PathUtilities {
   /**
    * Returns an object that indicates if the specified path represents a directory.
    *
-   * @platform android
-   * @platform ios
-   * @platform tvos
+   * > **Note:** On web, it works for paths in `Paths.cache` and `Paths.document` after
+   * > `await Paths.ready()`, and throws for any other path.
    */
   static info(...uris: string[]): PathInfo {
     return ExpoFileSystem.info(uris.join('/'));
