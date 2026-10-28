@@ -2,6 +2,11 @@ import ExpoModulesCore
 
 @ExpoModule("ExpoBlob", classes: [Blob.self])
 public final class ExpoBlob: Module {
+  // Serves `URL.createObjectURL` URLs to `URLSession`, which includes `fetch`.
+  public override func didCreate() {
+    BlobURLProtocol.install(appContext: appContext)
+  }
+
   @JS
   func store(blob: Blob) throws -> String {
     return try RNBlobStore(appContext: appContext).store(Data(try blob.bytesSync()))

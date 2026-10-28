@@ -93,7 +93,8 @@ const expoBlobUrls = new Map<string, string>();
  * throw an error.
  *
  * On iOS, the URL has the form `blob:<id>?offset=0&size=<n>`. React Native's networking and
- * `Image` load it.
+ * `Image` load it, and so do the global `fetch` (which is `expo/fetch` in Expo apps) and any
+ * `URLSession.shared` request in the app.
  *
  * On Android, the URL of an Expo `Blob` is a `content://<applicationId>.ExpoBlobProvider/<id>?offset=0&size=<n>`
  * URI, served by a content provider that the `expo` package declares, so it needs no manifest

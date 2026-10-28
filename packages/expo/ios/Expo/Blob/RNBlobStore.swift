@@ -61,22 +61,29 @@ internal struct RNBlobStore {
 
   /// Returns a copy of the referenced bytes, so they stay valid after the entry is removed from the store.
   func resolve(_ reference: RNBlobReference) throws -> Data {
+    return try resolve(blobId: reference.blobId, offset: reference.offset, size: reference.size)
+  }
+
+  /// Returns a copy of `size` bytes from `offset` of the entry, or of all bytes from `offset` when `size` is `nil`.
+  func resolve(blobId: String, offset: Int, size: Int?) throws -> Data {
     // - (NSData *)resolve:(NSDictionary<NSString *, id> *)blob;
     // Without `offset` and `size` it returns the whole entry. The range is cut here instead,
     // because React Native's `subdataWithRange:` raises an exception Swift cannot catch for a range out of bounds.
     let selector = NSSelectorFromString("resolve:")
-    let blobDictionary: NSDictionary = ["blobId": reference.blobId]
+    let blobDictionary: NSDictionary = ["blobId": blobId]
     guard blobManager.responds(to: selector),
       let data = blobManager.perform(selector, with: blobDictionary)?.takeUnretainedValue() as? Data
     else {
-      throw RNBlobResolveException(reference.blobId)
+      throw RNBlobResolveException(blobId)
     }
-    let start = reference.offset
-    let end = start + reference.size
-    guard start >= 0, reference.size >= 0, end <= data.count else {
-      throw RNBlobRangeException(reference.blobId)
+    guard offset >= 0, offset <= data.count else {
+      throw RNBlobRangeException(blobId)
     }
-    return Data(data[start..<end])
+    let size = size ?? (data.count - offset)
+    guard size >= 0, size <= data.count - offset else {
+      throw RNBlobRangeException(blobId)
+    }
+    return Data(data[offset..<(offset + size)])
   }
 
   /// Removes the bytes registered under the given blob id. Removing an unknown id is a no-op.

@@ -138,6 +138,13 @@ public final class ExpoFetchModule: Module {
         config.allowsCellularAccess = !useWifiOnly
       }
     }
+    // Serves `blob:` URLs of `URL.createObjectURL`. Sessions with their own configuration
+    // do not use the protocols registered with `URLProtocol.registerClass`.
+    var protocolClasses = config.protocolClasses ?? []
+    if !protocolClasses.contains(where: { $0 == BlobURLProtocol.self }) {
+      protocolClasses.insert(BlobURLProtocol.self, at: 0)
+    }
+    config.protocolClasses = protocolClasses
     return URLSession(configuration: config, delegate: urlSessionDelegate, delegateQueue: nil)
   }
 }
