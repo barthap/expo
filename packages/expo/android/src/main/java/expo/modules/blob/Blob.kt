@@ -9,6 +9,8 @@ import expo.modules.kotlin.typedarray.TypedArray
 import expo.modules.kotlin.types.EitherOfThree
 import expo.modules.kotlin.types.Enumerable
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import kotlin.math.max
 import kotlin.math.min
 import expo.modules.kotlin.types.OptimizedRecord
@@ -42,6 +44,13 @@ internal class Blob(val blobParts: List<InternalBlobPart> = listOf(), rawType: S
   fun bytesToStream(byteStream: ByteArrayOutputStream) {
     for (blobPart in blobParts) {
       blobPart.bytesToStream(byteStream)
+    }
+  }
+
+  // Writes all parts to `output` at its current position. File parts are copied in bounded chunks.
+  fun writeTo(output: FileChannel) {
+    for (blobPart in blobParts) {
+      blobPart.writeTo(output)
     }
   }
 
@@ -211,6 +220,15 @@ internal sealed class InternalBlobPart {
       is BlobWrapper -> blob.bytesToStream(byteStream)
       is BufferWrapper -> byteStream.write(buffer)
       is FileWrapper -> readFileRange(uri, offset, length, contentResolver, byteStream)
+    }
+  }
+
+  fun writeTo(output: FileChannel) {
+    when (this) {
+      is StringWrapper -> output.writeFully(ByteBuffer.wrap(cachedBytes))
+      is BlobWrapper -> blob.writeTo(output)
+      is BufferWrapper -> output.writeFully(ByteBuffer.wrap(buffer))
+      is FileWrapper -> copyFileRange(uri, offset, length, contentResolver, output)
     }
   }
 }

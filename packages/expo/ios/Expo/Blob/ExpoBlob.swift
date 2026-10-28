@@ -30,4 +30,27 @@ public final class ExpoBlob: Module {
     }
     return Blob(parts: [.file(url: url, offset: reference.offset, length: reference.size)], options: BlobOptions())
   }
+
+  // Writes the Blob to an existing file from its start, without truncating it, which is what writing the
+  // Blob's stream through a write-only `FileHandle` of `expo-file-system` does. Runs off the JS thread.
+  // Security-scoped URLs are out of v1: this works because the handle opened by `writableStream()` holds the access until it closes.
+  @JS(.concurrent)
+  func writeToFile(blob: Blob, uri: String) async throws {
+    guard let url = URL(string: uri), url.isFileURL else {
+      throw BlobWriteUnsupportedUriException(uri)
+    }
+    do {
+      let handle = try FileHandle(forWritingTo: url)
+      defer {
+        try? handle.close()
+      }
+      try handle.seek(toOffset: 0)
+      try blob.write(to: handle)
+    } catch let error as Exception {
+      // A file-backed part that cannot be read keeps its own error
+      throw error
+    } catch {
+      throw BlobWriteException(uri).causedBy(error)
+    }
+  }
 }

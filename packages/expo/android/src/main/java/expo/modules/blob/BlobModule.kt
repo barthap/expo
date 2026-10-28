@@ -64,6 +64,11 @@ class BlobModule : Module() {
       Blob(listOf(InternalBlobPart.FileWrapper(uri, reference.offset, reference.size.toInt(), contentResolver)))
     }
 
+    // Writes the Blob to a file from its start, without truncating it. Runs off the JS thread.
+    AsyncFunction("writeToFile") { blob: Blob, uri: String ->
+      writeBlobToFile(blob, uri)
+    }
+
     Class(Blob::class) {
       Constructor { blobParts: List<BlobPart>?, options: BlobOptionsBag? ->
         makeBlob(blobParts, options)

@@ -113,6 +113,23 @@ internal final class Blob: SharedObject, @unchecked Sendable {
     return Blob(parts: dataSlice, options: BlobOptions(type: typeString, endings: self.options.endings))
   }
 
+  /// Writes all parts to `output` at its current offset. File parts are copied in bounded chunks instead of
+  /// being read into memory at once.
+  func write(to output: FileHandle) throws {
+    for part in blobParts {
+      switch part {
+      case .string(let str):
+        try output.write(contentsOf: Data(str.utf8))
+      case .data(let data):
+        try output.write(contentsOf: data)
+      case .blob(let blob):
+        try blob.write(to: output)
+      case .file(let url, let offset, let length):
+        try copyFileRange(url: url, offset: offset, length: length, to: output)
+      }
+    }
+  }
+
   @JS(.concurrent)
   func text() async throws -> String {
     let allBytes = try await self.bytes()

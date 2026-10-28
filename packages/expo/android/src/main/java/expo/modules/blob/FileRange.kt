@@ -10,6 +10,7 @@ import expo.modules.kotlin.types.OptimizedRecord
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 
@@ -27,6 +28,15 @@ internal class BlobTooLargeException :
 
 internal class FileRangeReadException(uri: Uri, cause: Throwable?) :
   CodedException("Unable to read the file-backed Blob part from '$uri'. The file may have been deleted or moved", cause)
+
+internal class BlobWriteUnsupportedUriException(uri: String) :
+  CodedException("A Blob can be written only to a file:// URI, but received '$uri'")
+
+internal class BlobWriteException(uri: String, cause: Throwable?) :
+  CodedException("Unable to write the Blob to '$uri'", cause)
+
+// The largest number of bytes held in memory at once when a file-backed part is copied to a file
+private const val FILE_COPY_CHUNK_SIZE = 1024 * 1024
 
 /**
  * Points at a byte range of a file. Built by `expo-file-system` for `File` and `File.slice()`.
@@ -100,5 +110,81 @@ internal fun readFileRange(
     throw e
   } catch (e: Exception) {
     throw FileRangeReadException(uri, e)
+  }
+}
+
+internal fun FileChannel.writeFully(buffer: ByteBuffer) {
+  while (buffer.hasRemaining()) {
+    write(buffer)
+  }
+}
+
+/**
+ * Copies up to `length` bytes of the file at `uri`, starting at `offset`, to `output` in chunks of at most
+ * 1 MiB, so the range is never held in memory at once. Like [readFileRange], fewer bytes are copied when the
+ * file is now shorter than the range, and a missing or unreadable file throws.
+ */
+internal fun copyFileRange(
+  uri: Uri,
+  offset: Long,
+  length: Int,
+  contentResolver: ContentResolver,
+  output: FileChannel
+) {
+  val source = try {
+    openFileChannel(uri, contentResolver)
+  } catch (e: CodedException) {
+    throw e
+  } catch (e: Exception) {
+    throw FileRangeReadException(uri, e)
+  }
+  source.use { channel ->
+    val buffer = ByteBuffer.allocate(minOf(length, FILE_COPY_CHUNK_SIZE))
+    var remaining = length
+    try {
+      channel.position(offset)
+    } catch (e: Exception) {
+      throw FileRangeReadException(uri, e)
+    }
+    while (remaining > 0) {
+      buffer.clear()
+      buffer.limit(minOf(remaining, buffer.capacity()))
+      val read = try {
+        channel.read(buffer)
+      } catch (e: Exception) {
+        throw FileRangeReadException(uri, e)
+      }
+      if (read <= 0) {
+        break
+      }
+      buffer.flip()
+      output.writeFully(buffer)
+      remaining -= read
+    }
+  }
+}
+
+/**
+ * Writes the Blob to the file at the `file://` URI from its start, without truncating it. That is what
+ * writing the Blob's stream through a write-only `FileHandle` of `expo-file-system` does: it opens the file
+ * with `RandomAccessFile(file, "rw")`, which also creates a missing file.
+ */
+internal fun writeBlobToFile(blob: Blob, uri: String) {
+  val parsed = Uri.parse(uri)
+  val path = parsed.path
+  if (parsed.scheme != ContentResolver.SCHEME_FILE || path == null) {
+    throw BlobWriteUnsupportedUriException(uri)
+  }
+  try {
+    RandomAccessFile(File(path), "rw").use { file ->
+      val channel = file.channel
+      channel.position(0)
+      blob.writeTo(channel)
+    }
+  } catch (e: CodedException) {
+    // A file-backed part that cannot be read keeps its own error
+    throw e
+  } catch (e: Exception) {
+    throw BlobWriteException(uri, e)
   }
 }

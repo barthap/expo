@@ -21,6 +21,14 @@ function readMockFile(uri: string): Uint8Array {
   return reader(uri);
 }
 
+/**
+ * Writes bytes to a file from its start without truncating it, or throws when the file is missing,
+ * like the native `writeToFile`. A package with an in-memory file system mock (such as
+ * expo-file-system) registers its writer under this key.
+ */
+const FILE_WRITER_KEY = Symbol.for('expo.blob.mockFileWriter');
+type MockFileWriter = (uri: string, bytes: Uint8Array) => void;
+
 class Blob {
   readonly size: number;
   readonly type: string;
@@ -133,5 +141,32 @@ function fromFileRange(reference: { uri: string; offset: number; size: number })
   return createBlob(size, () => readMockFile(uri).slice(offset, offset + size), '');
 }
 
-export { Blob, store, release, fromReactNativeBlob, fromFileRange, reactNativeBlobStore };
-export default { Blob, store, release, fromReactNativeBlob, fromFileRange, reactNativeBlobStore };
+async function writeToFile(blob: Blob, uri: string): Promise<void> {
+  if (!uri.startsWith('file://')) {
+    throw new Error(`A Blob can be written only to a file:// URI, but received '${uri}'`);
+  }
+  const writer = (globalThis as { [FILE_WRITER_KEY]?: MockFileWriter })[FILE_WRITER_KEY];
+  if (!writer) {
+    throw new Error(`No mock file writer is registered, so '${uri}' cannot be written`);
+  }
+  writer(uri, blob['_read']());
+}
+
+export {
+  Blob,
+  store,
+  release,
+  fromReactNativeBlob,
+  fromFileRange,
+  writeToFile,
+  reactNativeBlobStore,
+};
+export default {
+  Blob,
+  store,
+  release,
+  fromReactNativeBlob,
+  fromFileRange,
+  writeToFile,
+  reactNativeBlobStore,
+};

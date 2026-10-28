@@ -91,6 +91,19 @@ export type FileRangeReference = {
 };
 
 /**
+ * Marks a `WritableStream` that writes to a file from its start, such as the result of
+ * `File.writableStream()` from `expo-file-system`, so that piping `Blob.stream()` into it can copy the
+ * Blob to the file natively. `uri` is the URI of the file. `offset` returns the position the stream
+ * writes its next chunk at, or `null` when it is unknown, and never throws.
+ * @hidden
+ * @private
+ */
+export type FileSinkReference = {
+  uri: string;
+  offset: () => number | null;
+};
+
+/**
  * @hidden
  * @private
  */
@@ -112,6 +125,10 @@ export declare class ExpoBlobModule extends NativeModule {
    * Creates a Blob with one part that reads the referenced range of a file on every read.
    */
   fromFileRange(reference: FileRangeReference): NativeBlob;
+  /**
+   * Writes the Blob to the existing file at the `file://` URI from its start, without truncating it.
+   */
+  writeToFile(blob: NativeBlob, uri: string): Promise<void>;
 }
 
 /**

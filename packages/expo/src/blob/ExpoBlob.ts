@@ -4,6 +4,7 @@ import type {
   BlobPart,
   ExpoBlobModule,
   FileRangeReference,
+  FileSinkReference,
   NativeBlob,
   ReactNativeBlobReference,
 } from './ExpoBlob.types';
@@ -62,6 +63,12 @@ const FILE_RANGE: unique symbol = Symbol.for('expo.blob.fileRange');
 // The Blob that a stream returned by `Blob.stream()` reads from
 const STREAM_SOURCE: unique symbol = Symbol.for('expo.blob.streamSource');
 
+/**
+ * A `WritableStream` that has this property writes to a file from its start, for example the
+ * result of `File.writableStream()` from `expo-file-system`. Its value is a `FileSinkReference`.
+ */
+const FILE_SINK: unique symbol = Symbol.for('expo.blob.fileSink');
+
 type FileRangeSource = { [FILE_RANGE]: () => FileRangeReference };
 
 // The largest size of a file-backed part: Blob sizes are signed 32-bit integers on Android
@@ -104,6 +111,134 @@ const createFileRangeBlob = (source: FileRangeSource): NativeBlob => {
     );
   }
   return NativeBlobModule.fromFileRange({ uri, offset, size });
+};
+
+// The reference of a file sink with a `file://` URI, or null for any other destination. Other
+// schemes, such as a `content://` URI on Android, go through the JS path, which writes them through
+// their own handle.
+const fileSinkReference = (destination: WritableStream<Uint8Array>): FileSinkReference | null => {
+  // Typed as partial: the property comes from another package and is checked before use
+  const reference: Partial<FileSinkReference> | null | undefined = (
+    destination as { [FILE_SINK]?: Partial<FileSinkReference> | null }
+  )[FILE_SINK];
+  const uri = reference?.uri;
+  const offset = reference?.offset;
+  return typeof uri === 'string' && uri.startsWith('file://') && typeof offset === 'function'
+    ? { uri, offset }
+    : null;
+};
+
+// The native copy writes from the start of the file, so it may run only while nothing was written
+// through the sink, which would otherwise be overwritten.
+const isAtFileStart = (sink: FileSinkReference): boolean => {
+  try {
+    return sink.offset() === 0;
+  } catch {
+    return false;
+  }
+};
+
+// The native copy writes the whole Blob at once, so it cannot honour options that stop a pipe
+// halfway or keep the destination open. Options that are not an object are left to the standard
+// `pipeTo`, which decides whether to reject them.
+const hasPipeOptions = (options: StreamPipeOptions | undefined): boolean =>
+  options !== undefined &&
+  (typeof options !== 'object' ||
+    options === null ||
+    !!options.preventClose ||
+    !!options.preventAbort ||
+    !!options.preventCancel ||
+    options.signal != null);
+
+/**
+ * Pipes a stream that has not been read yet into a file sink by copying its Blob natively. Locks,
+ * closes, and cancels the streams in the same way as `ReadableStream.prototype.pipeTo`.
+ */
+const pipeToFileSink = async (
+  stream: ReadableStream<Uint8Array>,
+  destination: WritableStream<Uint8Array>,
+  blob: NativeBlob,
+  sink: FileSinkReference,
+  options: StreamPipeOptions | undefined
+): Promise<void> => {
+  const reader = stream.getReader();
+  let writer: WritableStreamDefaultWriter<Uint8Array>;
+  try {
+    writer = destination.getWriter();
+  } catch (error) {
+    reader.releaseLock();
+    throw error;
+  }
+  let writtenBefore = false;
+  try {
+    try {
+      await writer.ready;
+      // Waits for chunks written before the pipe started, and rejects when the destination is
+      // closed or errored, so the file is not written behind a stream that has ended.
+      await writer.write(new Uint8Array(0));
+      // A chunk written without `await` before the pipe reaches the file only now
+      writtenBefore = !isAtFileStart(sink);
+      if (!writtenBefore) {
+        await NativeBlobModule.writeToFile(blob, sink.uri);
+      }
+    } catch (error) {
+      // No retry through JS: the native copy may already have written some bytes
+      await writer.abort(error).catch(() => {});
+      await reader.cancel(error).catch(() => {});
+      throw error;
+    }
+    if (!writtenBefore) {
+      try {
+        // Closes the file handle of the destination, as `pipeTo` does without `preventClose`
+        await writer.close();
+      } catch (error) {
+        await reader.cancel(error).catch(() => {});
+        throw error;
+      }
+      // Every byte is in the file, so the stream ends closed without being read
+      await reader.cancel();
+    }
+  } finally {
+    writer.releaseLock();
+    reader.releaseLock();
+  }
+  if (writtenBefore) {
+    // Nothing was read from the stream yet, so the standard pipe writes the whole Blob after them
+    await ReadableStream.prototype.pipeTo.call(stream, destination, options);
+  }
+};
+
+/**
+ * Defines `pipeTo` on a stream returned by `Blob.stream()`. Piping into a file sink, such as
+ * `File.writableStream()` from `expo-file-system`, copies the Blob to the file natively instead of
+ * moving every chunk through JS. Anything the native copy cannot reproduce goes through the
+ * standard `pipeTo`. `pipeThrough()` is not covered: the Streams spec has it run the internal pipe
+ * algorithm, not this property, so `blob.stream().pipeThrough(t).pipeTo(sink)` takes the JS path.
+ */
+const installFileSinkPipe = (
+  stream: ReadableStream<Uint8Array>,
+  blob: NativeBlob,
+  isConsumed: () => boolean
+): void => {
+  const pipeTo: ReadableStream<Uint8Array>['pipeTo'] = function (
+    this: ReadableStream<Uint8Array>,
+    destination,
+    options
+  ) {
+    const sink = this === stream && destination != null ? fileSinkReference(destination) : null;
+    if (
+      sink == null ||
+      hasPipeOptions(options) ||
+      isConsumed() ||
+      stream.locked ||
+      destination.locked ||
+      !isAtFileStart(sink)
+    ) {
+      return ReadableStream.prototype.pipeTo.call(this, destination, options);
+    }
+    return pipeToFileSink(stream, destination, blob, sink, options);
+  };
+  Object.defineProperty(stream, 'pipeTo', { value: pipeTo, writable: true, configurable: true });
 };
 
 const inputMapping = (blobPart: BlobPart) => {
@@ -185,10 +320,16 @@ export class Blob extends NativeBlobModule.Blob {
     const readChunk = (start: number, end: number) => this.slice(start, end).bytes();
     const size = this.size;
     let offset = 0;
+    // Set by the first pull or a cancel. A native copy must start from the first byte.
+    let consumed = false;
 
     const stream = new ReadableStream({
       type: 'bytes',
+      cancel() {
+        consumed = true;
+      },
       async pull(controller: ReadableByteStreamController) {
+        consumed = true;
         const view = controller.byobRequest?.view;
         if (offset >= size) {
           controller.close();
@@ -221,6 +362,8 @@ export class Blob extends NativeBlobModule.Blob {
     });
     // Lets a consumer of the stream, such as a native file sink, read the Blob directly
     Object.defineProperty(stream, STREAM_SOURCE, { value: this });
+
+    installFileSinkPipe(stream, this, () => consumed);
     return stream;
   }
 
