@@ -330,7 +330,8 @@ export async function test({ afterEach, describe, expect, it, pending }: Jasmine
         const dir = new Directory(Paths.cache, 'sub');
         expect(dir.exists).toBe(false);
         expect(dir.name).toBe('sub');
-        expect(dir.parentDirectory.uri).toBe('file:///cache');
+        // Like on native, a directory uri ends with a slash.
+        expect(dir.parentDirectory.uri).toBe('file:///cache/');
       });
 
       it('throws for directory operations and disk space', () => {

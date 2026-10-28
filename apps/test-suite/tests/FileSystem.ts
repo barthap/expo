@@ -48,9 +48,6 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
   const itWithBundle = onWeb ? t.xit : it;
   // Reads `Paths.info()` or the disk space.
   const describeWithPathInfo = onWeb ? t.xdescribe : describe;
-  // Expects the native clean-up of `file:` URIs (trailing slashes, the `localhost` host), which
-  // the web constructors do not do yet.
-  const itWithUriCleanup = onWeb ? t.xit : it;
 
   // The legacy API has no directories on web, so the specs that run there use the placeholder.
   const testDirectory = (onWeb ? Paths.document.uri : FS.documentDirectory) + 'tests/';
@@ -193,7 +190,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(file.uri).toBe('file:///path/to/file');
     });
 
-    itWithUriCleanup('Supports different slash combinations', async () => {
+    it('Supports different slash combinations', async () => {
       expect(new File('file:/path/to/file').uri).toBe('file:///path/to/file');
 
       // This URL is confusing, as path is actually a hostname.
@@ -205,12 +202,12 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
       expect(new File('file:///path/to/file').uri).toBe('file:///path/to/file');
     });
 
-    itWithUriCleanup('Accepts and correctly handles uris to files', () => {
+    it('Accepts and correctly handles uris to files', () => {
       expect(new File('file:/path/to/file').uri).toBe('file:///path/to/file');
       expect(new File('file:/path/to/file/').uri).toBe('file:///path/to/file');
     });
 
-    itWithUriCleanup('Accepts and correctly handles uris to directories', () => {
+    it('Accepts and correctly handles uris to directories', () => {
       expect(new Directory('file:/path/to/file').uri).toBe('file:///path/to/file/');
       expect(new Directory('file:/path/to/file/').uri).toBe('file:///path/to/file/');
     });
@@ -1999,11 +1996,11 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
     });
 
     describe('JS-only properties for path manipulation', () => {
-      itWithUriCleanup('return parentDirectory for files', () => {
+      it('return parentDirectory for files', () => {
         const file = new File(testDirectory, 'image.jpeg');
         expect(file.parentDirectory.uri).toBe(new Directory(testDirectory).uri);
       });
-      itWithUriCleanup('return parentDirectory for directories', () => {
+      it('return parentDirectory for directories', () => {
         const directory = new Directory(testDirectory, '/testdirectory/sampleDir');
         expect(directory.parentDirectory.parentDirectory.uri).toBe(
           new Directory(testDirectory).uri
@@ -2021,7 +2018,7 @@ export async function test({ describe, expect, it, ...t }: JasmineInterface) {
         );
       });
 
-      itWithUriCleanup('joins paths in the File and Directory constructors', () => {
+      it('joins paths in the File and Directory constructors', () => {
         expect(new File('file:///path', 'to', '..', 'file').uri).toBe('file:///path/file');
         expect(new Directory('file:///path', 'to', '..', 'directory').uri).toBe(
           'file:///path/directory/'
