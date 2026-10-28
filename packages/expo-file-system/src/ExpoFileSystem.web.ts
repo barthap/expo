@@ -277,6 +277,12 @@ class FileSystemFile extends globalThis.File {
   create(): never {
     throw unsupportedFileMember('create');
   }
+  createAsync(): Promise<never> {
+    return Promise.reject(unsupportedFileMember('createAsync'));
+  }
+  async deleteAsync(): Promise<void> {
+    this.delete();
+  }
   copy(): Promise<never> {
     return Promise.reject(unsupportedFileMember('copy'));
   }
@@ -358,6 +364,18 @@ class FileSystemDirectory {
   }
   create(): never {
     throw unsupportedDirectoryMember('create');
+  }
+  createAsync(): Promise<never> {
+    return Promise.reject(unsupportedDirectoryMember('createAsync'));
+  }
+  deleteAsync(): Promise<never> {
+    return Promise.reject(unsupportedDirectoryMember('deleteAsync'));
+  }
+  createFileAsync(): Promise<never> {
+    return Promise.reject(unsupportedDirectoryMember('createFileAsync'));
+  }
+  createDirectoryAsync(): Promise<never> {
+    return Promise.reject(unsupportedDirectoryMember('createDirectoryAsync'));
   }
   createFile(): never {
     throw unsupportedDirectoryMember('createFile');

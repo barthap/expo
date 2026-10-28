@@ -6,6 +6,7 @@ import { Directory } from './Directory';
 import ExpoFileSystem from './ExpoFileSystem';
 import {
   FileMode,
+  type FileCreateOptions,
   type FileCanPreviewOptions,
   type FilePreviewOptions,
   type FilePreviewCollectionOptions,
@@ -342,6 +343,47 @@ export class File extends ExpoFileSystem.FileSystemFile implements Blob {
       throw new UnavailabilityError('expo-file-system', 'File.toWebFile');
     }
     return super.toWebFile();
+  }
+
+  /**
+   * Creates the file, like `create()`, and returns a promise, so code that runs on every platform
+   * can `await` it. On Android, iOS, and tvOS, it calls `create()` with the same options.
+   *
+   * > **Note:** On web, it creates an empty file in the Origin Private File System for a file in
+   * > `Paths.cache` or `Paths.document`, and rejects for any other file.
+   *
+   * @param options Options for creating the file.
+   * @returns A promise that resolves when the file is created, or rejects with the error that
+   * `create()` throws.
+   *
+   * @example
+   * ```ts
+   * const file = new File(Paths.document, 'notes', 'today.txt');
+   * await file.createAsync({ intermediates: true });
+   * ```
+   */
+  async createAsync(options?: FileCreateOptions): Promise<void> {
+    if (Platform.OS === 'web') {
+      return super.createAsync(options);
+    }
+    this.create(options);
+  }
+
+  /**
+   * Deletes the file, like `delete()`, and returns a promise, so code that runs on every platform
+   * can `await` it. On Android, iOS, and tvOS, it calls `delete()`.
+   *
+   * > **Note:** On web, it removes a file in `Paths.cache` or `Paths.document` from the Origin
+   * > Private File System, and does what `delete()` does for any other file.
+   *
+   * @returns A promise that resolves when the file is deleted, or rejects with the error that
+   * `delete()` throws.
+   */
+  async deleteAsync(): Promise<void> {
+    if (Platform.OS === 'web') {
+      return super.deleteAsync();
+    }
+    this.delete();
   }
 
   /**

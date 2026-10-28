@@ -91,6 +91,27 @@ export declare class NativeFileSystemDirectory {
   createDirectory(name: string): PublicDirectory;
 
   /**
+   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `create()`.
+   */
+  createAsync(options?: DirectoryCreateOptions): Promise<void>;
+
+  /**
+   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `delete()`.
+   */
+  deleteAsync(): Promise<void>;
+
+  /**
+   * @hidden The shared `Directory` documents it. On Android and iOS, it calls `createFile()`.
+   */
+  createFileAsync(name: string, mimeType: string | null): Promise<PublicFile>;
+
+  /**
+   * @hidden The shared `Directory` documents it. On Android and iOS, it calls
+   * `createDirectory()`.
+   */
+  createDirectoryAsync(name: string): Promise<PublicDirectory>;
+
+  /**
    * Watches this directory for changes to its contents.
    */
   watch(
@@ -344,6 +365,16 @@ export declare class NativeFileSystemFile {
    * @platform tvos
    */
   create(options?: FileCreateOptions): void;
+
+  /**
+   * @hidden The shared `File` documents it. On Android and iOS, it calls `create()`.
+   */
+  createAsync(options?: FileCreateOptions): Promise<void>;
+
+  /**
+   * @hidden The shared `File` documents it. On Android and iOS, it calls `delete()`.
+   */
+  deleteAsync(): Promise<void>;
 
   /**
    * Copies a file.

@@ -1,3 +1,6 @@
+import { Platform } from 'react-native';
+
+import type { DirectoryCreateOptions } from './Directory.types';
 import ExpoFileSystem from './ExpoFileSystem';
 import { File } from './File';
 import type { WatchEvent, WatchOptions, WatchSubscription } from './FileSystemWatcher.types';
@@ -82,6 +85,82 @@ export class Directory extends ExpoFileSystem.FileSystemDirectory {
    */
   createDirectory(name: string): Directory {
     return new Directory(super.createDirectory(name).uri);
+  }
+
+  /**
+   * Creates the directory, like `create()`, and returns a promise, so code that runs on every
+   * platform can `await` it. On Android, iOS, and tvOS, it calls `create()` with the same options.
+   *
+   * > **Note:** On web, it creates the directory in the Origin Private File System for a directory
+   * > in `Paths.cache` or `Paths.document`, and rejects for any other directory. With
+   * > `overwrite: true`, an existing directory and everything in it is removed first, except for
+   * > `Paths.cache` and `Paths.document` themselves, which always exist and keep their content.
+   *
+   * @param options Options for creating the directory.
+   * @returns A promise that resolves when the directory is created, or rejects with the error
+   * that `create()` throws.
+   *
+   * @example
+   * ```ts
+   * const directory = new Directory(Paths.document, 'albums', '2026');
+   * await directory.createAsync({ intermediates: true, idempotent: true });
+   * ```
+   */
+  async createAsync(options?: DirectoryCreateOptions): Promise<void> {
+    if (Platform.OS === 'web') {
+      return super.createAsync(options);
+    }
+    this.create(options);
+  }
+
+  /**
+   * Deletes the directory and everything inside it, like `delete()`, and returns a promise, so
+   * code that runs on every platform can `await` it. On Android, iOS, and tvOS, it calls
+   * `delete()`.
+   *
+   * > **Note:** On web, it works for a directory in `Paths.cache` or `Paths.document`, and rejects
+   * > for any other directory.
+   *
+   * @returns A promise that resolves when the directory is deleted, or rejects with the error that
+   * `delete()` throws.
+   */
+  async deleteAsync(): Promise<void> {
+    if (Platform.OS === 'web') {
+      return super.deleteAsync();
+    }
+    this.delete();
+  }
+
+  /**
+   * Creates a file with the given name in this directory, like `createFile()`, and returns a
+   * promise, so code that runs on every platform can `await` it. On Android, iOS, and tvOS, it
+   * calls `createFile()`.
+   *
+   * @param name The name of the file.
+   * @param mimeType The MIME type of the file. Only Android uses it, for SAF `content://`
+   * directories.
+   * @returns A promise that resolves to the created file.
+   */
+  async createFileAsync(name: string, mimeType: string | null): Promise<File> {
+    if (Platform.OS === 'web') {
+      return new File((await super.createFileAsync(name, mimeType)).uri);
+    }
+    return this.createFile(name, mimeType);
+  }
+
+  /**
+   * Creates a directory with the given name in this directory, like `createDirectory()`, and
+   * returns a promise, so code that runs on every platform can `await` it. On Android, iOS, and
+   * tvOS, it calls `createDirectory()`.
+   *
+   * @param name The name of the directory.
+   * @returns A promise that resolves to the created directory.
+   */
+  async createDirectoryAsync(name: string): Promise<Directory> {
+    if (Platform.OS === 'web') {
+      return new Directory((await super.createDirectoryAsync(name)).uri);
+    }
+    return this.createDirectory(name);
   }
 
   /**

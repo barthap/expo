@@ -426,6 +426,60 @@ describe('expo-file-system behavioral mock', () => {
     expect(new File(Paths.cache, 'doomed', 'inner', 'b.txt').exists).toBe(false);
   });
 
+  // The async methods exist so cross-platform code can await them on web. On native they must
+  // behave exactly like the sync methods, including their options and their errors.
+  describe('async create and delete methods', () => {
+    it('File.createAsync and File.deleteAsync call create and delete with the same options', async () => {
+      const file = new File(Paths.cache, 'nested', 'async.txt');
+      const create = jest.spyOn(file, 'create');
+      const del = jest.spyOn(file, 'delete');
+      await file.createAsync({ intermediates: true });
+      expect(create).toHaveBeenCalledWith({ intermediates: true });
+      expect(file.exists).toBe(true);
+      await file.deleteAsync();
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(file.exists).toBe(false);
+    });
+
+    it('Directory.createAsync and Directory.deleteAsync call create and delete with the same options', async () => {
+      const dir = new Directory(Paths.cache, 'async-dir');
+      const create = jest.spyOn(dir, 'create');
+      await dir.createAsync({ idempotent: true });
+      await dir.createAsync({ idempotent: true });
+      expect(create.mock.calls).toEqual([[{ idempotent: true }], [{ idempotent: true }]]);
+      expect(dir.exists).toBe(true);
+      const del = jest.spyOn(dir, 'delete');
+      await dir.deleteAsync();
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(dir.exists).toBe(false);
+    });
+
+    it('rejects with the error the sync method throws, instead of throwing synchronously', async () => {
+      const dir = new Directory(Paths.cache, 'twice');
+      dir.create();
+      const promise = dir.createAsync();
+      await expect(promise).rejects.toThrow('Directory already exists');
+      await expect(new File(Paths.cache, 'missing.txt').deleteAsync()).rejects.toThrow(
+        'File does not exist'
+      );
+    });
+
+    it('Directory.createFileAsync and createDirectoryAsync return what the sync methods return', async () => {
+      const dir = new Directory(Paths.cache, 'children');
+      dir.create();
+      const createFile = jest.spyOn(dir, 'createFile');
+      const file = await dir.createFileAsync('a.txt', 'text/plain');
+      expect(createFile).toHaveBeenCalledWith('a.txt', 'text/plain');
+      expect(file).toBeInstanceOf(File);
+      expect(file.exists).toBe(true);
+      const createDirectory = jest.spyOn(dir, 'createDirectory');
+      const child = await dir.createDirectoryAsync('inner');
+      expect(createDirectory).toHaveBeenCalledWith('inner');
+      expect(child).toBeInstanceOf(Directory);
+      expect(child.exists).toBe(true);
+    });
+  });
+
   it('File.delete throws when the file does not exist', () => {
     const file = new File(Paths.cache, 'missing.txt');
     expect(() => file.delete()).toThrow();

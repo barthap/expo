@@ -575,13 +575,19 @@ describe('File on web, unsupported members', () => {
     expect(() => f[member]()).toThrow(ERR_UNAVAILABLE);
   });
 
-  it.each(['write', 'copy', 'move', 'base64', 'digest', 'canPreview', 'preview'] as const)(
-    '%s() rejects with UnavailabilityError',
-    async (member) => {
-      const f = file() as any;
-      await expect(f[member]()).rejects.toEqual(ERR_UNAVAILABLE);
-    }
-  );
+  it.each([
+    'write',
+    'copy',
+    'move',
+    'base64',
+    'digest',
+    'canPreview',
+    'preview',
+    'createAsync',
+  ] as const)('%s() rejects with UnavailabilityError', async (member) => {
+    const f = file() as any;
+    await expect(f[member]()).rejects.toEqual(ERR_UNAVAILABLE);
+  });
 
   it.each(['md5', 'modificationTime', 'creationTime', 'contentUri'] as const)(
     '%s throws UnavailabilityError',
@@ -590,6 +596,13 @@ describe('File on web, unsupported members', () => {
       expect(() => f[member]).toThrow(ERR_UNAVAILABLE);
     }
   );
+
+  it('deleteAsync() releases the data like delete()', async () => {
+    const f = file();
+    await f.deleteAsync();
+    expect(f.exists).toBe(false);
+    expect(new File(f.uri).exists).toBe(false);
+  });
 
   it('explains what is missing and what to use instead', () => {
     expect(() => file().writeSync('x')).toThrow(/File\.writeSync is not available on web.*fetch/);
@@ -633,6 +646,10 @@ describe('Directory and Paths on web', () => {
     expect(() => dir.delete()).toThrow(ERR_UNAVAILABLE);
     expect(() => dir.size).toThrow(ERR_UNAVAILABLE);
     await expect(dir.copy(Paths.document)).rejects.toEqual(ERR_UNAVAILABLE);
+    await expect(dir.createAsync()).rejects.toEqual(ERR_UNAVAILABLE);
+    await expect(dir.deleteAsync()).rejects.toEqual(ERR_UNAVAILABLE);
+    await expect(dir.createFileAsync('a.txt', null)).rejects.toEqual(ERR_UNAVAILABLE);
+    await expect(dir.createDirectoryAsync('inner')).rejects.toEqual(ERR_UNAVAILABLE);
     expect(() => dir.watch(() => {})).toThrow(ERR_UNAVAILABLE);
   });
 
