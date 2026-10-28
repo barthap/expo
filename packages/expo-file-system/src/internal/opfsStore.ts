@@ -311,6 +311,43 @@ export class OpfsStore {
     return entries;
   }
 
+  /**
+   * Returns every entry below the directory at `uri`, each with its names relative to `uri`, in
+   * one walk over the handles. An entry that disappears during the walk (removed in another tab)
+   * is left out.
+   */
+  async readTree(uri: string): Promise<[names: string[], entry: OpfsEntry][]> {
+    const handle = await this.#directory(opfsPathOrThrow(uri), uri, 'list');
+    // Returns the entries of a subtree, so a directory that disappears drops all of them.
+    const visit = async (
+      directory: FileSystemDirectoryHandle,
+      prefix: string[]
+    ): Promise<[string[], OpfsEntry][]> => {
+      const tree: [string[], OpfsEntry][] = [];
+      for await (const [name, child] of directory.entries()) {
+        const names = [...prefix, name];
+        try {
+          if (child.kind === 'file') {
+            tree.push([names, fileEntry(await child.getFile())]);
+          } else {
+            const subtree = await visit(child, names);
+            tree.push([names, DIRECTORY_ENTRY], ...subtree);
+          }
+        } catch (error) {
+          if ((error as { name?: unknown } | null)?.name !== 'NotFoundError') {
+            throw error;
+          }
+        }
+      }
+      return tree;
+    };
+    try {
+      return await visit(handle, []);
+    } catch (error) {
+      throw toFileSystemError(error, { uri, operation: 'list', expected: 'directory' });
+    }
+  }
+
   /** Removes the file at `uri`. A directory at `uri` throws `ERR_INVALID_TYPE_FILE`. */
   async removeFile(uri: string): Promise<void> {
     const [root, ...names] = opfsPathOrThrow(uri);

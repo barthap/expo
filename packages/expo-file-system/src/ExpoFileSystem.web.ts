@@ -2,6 +2,7 @@ import { CodedError, UnavailabilityError } from 'expo-modules-core';
 
 import type { PickFileOptions } from './File.types';
 import type { DownloadOptions } from './NetworkTasks.types';
+import { getOpfsIndex } from './internal/opfsIndex';
 import { normalizeFileUri } from './internal/opfsPaths';
 import { PathUtilities } from './pathUtilities';
 
@@ -587,6 +588,9 @@ export default {
     );
   },
   pickFileAsync,
+  // Fills the in-memory index of the OPFS storage. Nothing calls it yet, and `Paths.cache` and
+  // `Paths.document` do not use the storage yet.
+  ready: () => getOpfsIndex().ready(),
   info: () => {
     throw unavailable('Paths.info', 'Paths on web do not point to stored files or directories.');
   },
